@@ -42,11 +42,11 @@ void DRV832xDriver::init(SPIClass* _spi) {
 
 		//attachInterrupt(digitalPinToInterrupt(nFault), handleInterrupt, PinStatus::FALLING);
 	}
-	/*for (size_t i = 0; i < 7; i++)
-	{
-		auto read = readSPI(i);
-		Serial.printf("DRV8323 Register %d = %#x\n", i, read);
-	}*/
+	// for (size_t i = 0; i < 7; i++)
+	// {
+	// 	auto read = readSPI(i);
+	// 	Serial.printf("DRV8323 Register %d = %#x\n", i, read);
+	// }
 };
 
 

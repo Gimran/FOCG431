@@ -32,12 +32,16 @@
 
 // https://docs.simplefoc.com/sensorless_foc_nucleo_example
 
-
+void printDrv8323Regs();
+void DRV8323_SPI_Read(DRV8323_VARS_t *v, uint16_t address);
+uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data);
+void DRV8323_SPI_Write(DRV8323_VARS_t *v, uint16_t address);
 
 
 BLDCMotor motor = BLDCMotor(7, 2.3, 220, 0.00086);
 
-BLDCDriver6PWM driver = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
+// BLDCDriver6PWM driver = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
+BLDCDriver6PWM driverBase = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
 // DRV832xDriver6PWM driver = DRV832xDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, DRV_CS, false, DRV_ENABLE, DRV_NFAULT);
 LowsideCurrentSense current_sense = LowsideCurrentSense(0.005, 40, PA0, PA1, PA2);
 
@@ -53,17 +57,34 @@ Commander command = Commander(COM_OW);
 // Commander command = Commander(Serial3);
 void doMotor(char* cmd){ command.motor(&motor, cmd);}
 
-// get analog input 
-void doAnalog(char* cmd){ 
-    if (cmd[0] == '0') Serial.println("check_serial");
-    else if (cmd[0] == '1') Serial.println("check_serial1");
+// get analog input
+void doAnalog(char *cmd)
+{
+  if (cmd[0] == '0')
+  {
+    for (uint16_t i = 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
+    {
+      gDrv8323.CSA_Control.all = 0;
+      DRV8323_SPI_Read(&gDrv8323, i);
+      HAL_Delay(5);
+    }
+    printDrv8323Regs();
+  }
+  else if (cmd[0] == '1')
+  {
+    Serial3.println("change gain to 40");
+    gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_40;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+  }
+    else if (cmd[0] == '2')
+  {
+    DRV8323_SPI_Read(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+    Serial3.println("change gain to 20");
+    gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_20;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+  }
 }
-// put function declarations here:
-// int myFunction(int, int);
 
-// ----------------------------------------------------------------------
-// Global Variables
-// ----------------------------------------------------------------------
 // DRV830x SPI Input Data bit definitions:
 struct  DRV830x_SPI_WRITE_WORD_BITS {       // bit      description
     uint16_t DATA:11;                       // 10:0     FIFO reset
@@ -76,8 +97,6 @@ union DRV830x_SPI_WRITE_WORD_REG {
     struct DRV830x_SPI_WRITE_WORD_BITS bit;
 };
 
-
-
 uint16_t readDRVReg(uint8_t addr) {
   digitalWrite(DRV_CS, LOW);
   SPI_3.beginTransaction(SPISettings(10000, MSBFIRST, SPI_MODE1));
@@ -88,7 +107,6 @@ uint16_t readDRVReg(uint8_t addr) {
   digitalWrite(DRV_CS, HIGH);
   return rx_data; //& 0x07FF; // Значения лежат в младших 11 битах
 }
-
 uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data)
 {
     uint8_t highByte = (uint8_t)((data >> 8) & 0x00FF);
@@ -101,8 +119,10 @@ uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data)
     //Transmit Data to slave
     // USCI_B_SPI_transmitData(USCI_B0_BASE, highByte);
     SPI_3.beginTransaction(SPISettings(10000, MSBFIRST, SPI_MODE1));
-    returnValue = SPI_3.transfer(highByte);
-    returnValue |= SPI_3.transfer(lowByte);
+    returnValue = SPI_3.transfer16(data);
+    SPI_3.endTransaction();
+    // returnValue = SPI_3.transfer(highByte);
+    // returnValue |= SPI_3.transfer(lowByte);
 
 
 
@@ -121,8 +141,6 @@ uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data)
 
     return returnValue;
 }
-
-
 void DRV8323_SPI_Read(DRV8323_VARS_t *v, uint16_t address)
 {
     union DRV830x_SPI_WRITE_WORD_REG w;
@@ -134,13 +152,26 @@ void DRV8323_SPI_Read(DRV8323_VARS_t *v, uint16_t address)
     w.bit.DATA = 0;
 
     // Enable CS; SPI transfer; Disable CS
-    digitalWrite(DRV_CS, LOW);// GPIO_setOutputLowOnPin(v->ScsPort, v->ScsPin);
+    digitalWrite(DRV_CS, LOW);
     
     cntrlReg[address] = SPI_Driver(v, w.all);
-    digitalWrite(DRV_CS, HIGH);// GPIO_setOutputHighOnPin(v->ScsPort, v->ScsPin);
+
+    digitalWrite(DRV_CS, HIGH);
 }
+void DRV8323_SPI_Write(DRV8323_VARS_t *v, uint16_t address)
+{
+    union DRV830x_SPI_WRITE_WORD_REG w;
+    uint16_t * cntrlReg;
 
+    cntrlReg = (uint16_t*)&(v->Fault_Status_1);
+    w.bit.R_W = WRITE;
+    w.bit.ADDRESS = address;
+    w.bit.DATA = cntrlReg[address];
 
+    digitalWrite(DRV_CS, LOW);
+    SPI_Driver(v, w.all);
+    digitalWrite(DRV_CS, HIGH);
+}
 void printDrv8323Regs() {
   Serial3.println("--- DRV8323 gDrv8323 Registers ---");
   Serial3.print("Fault_Status_1: 0x");  Serial3.println(gDrv8323.Fault_Status_1.all,  HEX);
@@ -157,56 +188,42 @@ void printDrv8323Regs() {
 
 }
 
-
 void setup()
 {
-
-  pinMode(RS485_DIR_PIN, OUTPUT);
-  digitalWrite(RS485_DIR_PIN, LOW);
+  SPI_3.begin();
   Serial3.begin(921600);
   COM_OW.println("start");
 
-  // DRV8323
+  pinMode(RS485_DIR_PIN, OUTPUT);
+
+  pinMode(DRV_NFAULT, INPUT);
   pinMode(DRV_ENABLE, OUTPUT);
-  digitalWrite(DRV_ENABLE, HIGH);
-  // pinMode(DRV_NFAULT, INPUT);
+  pinMode(CAL_CURR, OUTPUT);
   pinMode(DRV_CS, OUTPUT);
-  // digitalWrite(DRV_CS, HIGH);
-  SPI_3.begin();
+
+  digitalWrite(DRV_ENABLE, HIGH); 
+  digitalWrite(DRV_CS, LOW);
+
+  digitalWrite(CAL_CURR, HIGH);
+  _delay(100);
+  digitalWrite(CAL_CURR, LOW);
 
   command.add('A', doAnalog, "analog read A0-A4");
 
-  SimpleFOCDebug::enable(&COM_OW);
-
-
-
+  // SimpleFOCDebug::enable(&COM_OW);
 
   // driver config
-  driver.enable();
-  // driver.init(&SPI_3);
-  driver.init();
+  
+  // driver.init();
+  
+  // delay(100);
 
-    for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
-    {
-        DRV8323_SPI_Read(&gDrv8323, i);
-        HAL_Delay(5);
-    }
-
-    // Serial3.print("CSA_Control_REG:%X", gDrv8323.CSA_Control.all);
-    
-  //   Serial3.println("--- DRV8323 Default Registers ---");
-  // // Чтение регистров с 0x0 по 0x6
-  // for (uint8_t i = 0; i <= 10; i++) {
-  //   uint16_t val = readDRVReg(i);
-  //   Serial3.print("Reg 0x");
-  //   Serial3.print(i, HEX);
-  //   Serial3.print(": 0x");
-  //   if (val < 0x10) Serial3.print("0"); // Ведущие нули
-  //   if (val < 0x100) Serial3.print("0");
-  //   Serial3.println(val, BIN);
-  // }
-  // Serial3.println("---------------------------------");
-  printDrv8323Regs();
+  //   for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
+  //   {
+  //       DRV8323_SPI_Read(&gDrv8323, i);
+  //       HAL_Delay(5);
+  //   }
+  // printDrv8323Regs();
 
   /*
   --- DRV8323 Default Registers ---
@@ -217,23 +234,21 @@ Reg 0x3: 0x01111111111
 Reg 0x4: 0x11111111111
 Reg 0x5: 0x00101011001
 Reg 0x6: 0x01010000011
-Reg 0x7: 0x00000000000
-
-  */
+Reg 0x7: 0x00000000000  */
 
 
-  //   driver.setRegistersLocked(false);
+  // driver.setRegistersLocked(false);
 
   // // // Токи затвора для BSZ014NE2LS5IF
   // driver.setHighSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
 
-  //     for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
-  //   {
-  //       DRV8323_SPI_Read(&gDrv8323, i);
-  //       HAL_Delay(5);
-  //   }
+  // //     for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
+  // //   {
+  // //       DRV8323_SPI_Read(&gDrv8323, i);
+  // //       HAL_Delay(5);
+  // //   }
 
-  // printDrv8323Regs();
+  // // printDrv8323Regs();
   // driver.setHighSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
   // driver.setLowSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
   // driver.setLowSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
@@ -246,16 +261,31 @@ Reg 0x7: 0x00000000000
   // driver.setCurrentSenseOvercurrentSensitivity(DRV832x_CS_VSEN_LVL::CSAGain_250mV); // Защита 1.25А
   // driver.setCurrentSenseGain(DRV832x_CSAGain::CSAGain_40); // Усиление 40
 
-    // power supply voltage [V]
-  driver.voltage_power_supply = 12;
-  driver.pwm_frequency = 20000;
+  //  driver.setRegistersLocked(false);
+    //  driver.setCurrentSenseGain(DRV832x_CSAGain::CSAGain_40); // Усиление 40
+        // driver.setRegistersLocked(true);
 
+  // driver.init(&SPI_3);
+  // driverBase.enable();
+  // digitalWrite(DRV_ENABLE, HIGH);
+  driverBase.enable();
+  driverBase.init();
 
-  current_sense.linkDriver(&driver);
+  DRV8323_SPI_Read(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+    Serial3.println("change gain to 20");
+    gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_20;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+
+  // current_sense.linkDriver(&driver);
+  current_sense.linkDriver(&driverBase);
   current_sense.init();
+    // power supply voltage [V]
+  driverBase.voltage_power_supply = 12;
+  driverBase.pwm_frequency = 45000;
 
+  // motor.linkDriver(&driver);
+  motor.linkDriver(&driverBase);
   motor.linkSensor(&observer);
-  motor.linkDriver(&driver);
 
   motor.controller = MotionControlType::velocity_openloop;
   motor.torque_controller = TorqueControlType::foc_current;
@@ -268,13 +298,11 @@ Reg 0x7: 0x00000000000
   motor.zero_electric_angle = 0;
 
   motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-  motor.monitor_downsample = 50; // default 10
+  motor.monitor_downsample = 100; // default 10
 
-  motor.current_limit = 0.5;  //amp
+  motor.current_limit = 0.3;  //amp
 
   motor.init();
-
-
   motor.initFOC();
 
   // subscribe motor to the commander
@@ -287,16 +315,33 @@ Reg 0x7: 0x00000000000
 Serial3.print(SystemCoreClock / 1000000);
 Serial3.println(" MHz");
 
+if (!digitalRead(DRV_NFAULT))
+{
+  Serial3.println(" FAULT!");
+}
 
+
+
+    for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
+    {
+        DRV8323_SPI_Read(&gDrv8323, i);
+        HAL_Delay(5);
+    }
+  printDrv8323Regs();
 
   _delay(1000);
 }
 
 void loop() {
-  motor.move();
   motor.loopFOC();
-  // motor.monitor();
+  motor.move();
   command.run();
+  // motor.monitor();
+
+  if (!digitalRead(DRV_NFAULT))
+{
+  Serial3.println(" FAULT!");
+}
 }
 
 // put function definitions here:

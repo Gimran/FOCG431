@@ -19,6 +19,7 @@ extern "C" {
 #define DRV_CAL    PB8
 #define DRV_NFAULT PB6
 #define DRV_ENABLE PB7
+#define CAL_CURR   PB8
 
 
 // #ifndef HIGH
