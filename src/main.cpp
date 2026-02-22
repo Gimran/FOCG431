@@ -37,8 +37,8 @@
 
 BLDCMotor motor = BLDCMotor(7, 2.3, 220, 0.00086);
 
-// BLDCDriver6PWM driver = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
-DRV832xDriver6PWM driver = DRV832xDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, DRV_CS, false, DRV_ENABLE, DRV_NFAULT);
+BLDCDriver6PWM driver = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
+// DRV832xDriver6PWM driver = DRV832xDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, DRV_CS, false, DRV_ENABLE, DRV_NFAULT);
 LowsideCurrentSense current_sense = LowsideCurrentSense(0.005, 40, PA0, PA1, PA2);
 
 MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
@@ -183,8 +183,8 @@ void setup()
 
   // driver config
   driver.enable();
-  driver.init(&SPI_3);
-  // driver.init();
+  // driver.init(&SPI_3);
+  driver.init();
 
     for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
     {
@@ -225,7 +225,7 @@ Reg 0x7: 0x00000000000
   //   driver.setRegistersLocked(false);
 
   // // // Токи затвора для BSZ014NE2LS5IF
-  driver.setHighSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
+  // driver.setHighSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
 
   //     for(uint16_t i= 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
   //   {
@@ -234,17 +234,17 @@ Reg 0x7: 0x00000000000
   //   }
 
   // printDrv8323Regs();
-  driver.setHighSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
-  driver.setLowSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
-  driver.setLowSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
+  // driver.setHighSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
+  // driver.setLowSideChargeCurrent(DRV832x_IDRIVEP::IDRIVEP_120mA);
+  // driver.setLowSideDischargeCurrent(DRV832x_IDRIVEN::IDRIVEN_240mA);
 
-  driver.setDeadTime(DRV832x_DEADTIME::DEADTIME_200ns);
-  driver.setVDSLevel(DRV832x_VDS_LVL::VDS_LVL_260mV);
+  // driver.setDeadTime(DRV832x_DEADTIME::DEADTIME_200ns);
+  // driver.setVDSLevel(DRV832x_VDS_LVL::VDS_LVL_260mV);
 
-  // Настройка токовых усилителей под VREF = 3.3V
-  driver.setCurrentSenseBidirectionnal(true); // Ноль тока = VREF/2 = 1.65В
-  driver.setCurrentSenseOvercurrentSensitivity(DRV832x_CS_VSEN_LVL::CSAGain_250mV); // Защита 1.25А
-  driver.setCurrentSenseGain(DRV832x_CSAGain::CSAGain_40); // Усиление 40
+  // // Настройка токовых усилителей под VREF = 3.3V
+  // driver.setCurrentSenseBidirectionnal(true); // Ноль тока = VREF/2 = 1.65В
+  // driver.setCurrentSenseOvercurrentSensitivity(DRV832x_CS_VSEN_LVL::CSAGain_250mV); // Защита 1.25А
+  // driver.setCurrentSenseGain(DRV832x_CSAGain::CSAGain_40); // Усиление 40
 
     // power supply voltage [V]
   driver.voltage_power_supply = 12;
