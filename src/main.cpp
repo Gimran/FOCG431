@@ -4,10 +4,43 @@
 
 #include <SimpleFOCDrivers.h>
 #include "encoders/MXLEMMING_observer/MXLEMMINGObserverSensor.h"
+#include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
+#include "utilities/trapezoids/TrapezoidalPlanner.h"
 #include <SPI.h>
 // #include <drv832x.h>
 #include <drv8323rs.h>
 #include <LibPrintf.h>
+
+#define BLDC_2804
+// #define BLDC_MOSRAC_U3822
+
+#ifdef BLDC_2804
+#define POLE_PAIRS        7
+#define PHASE_RESISTANCE  2.3f
+#define KV_RATING         220
+#define L_Q               0.00086f
+
+#define SHUNT_OM          0.005f
+#define GAIN              40
+
+#define MAX_CURRENT       0.3f
+#define OPERATION_VOLTAGE 12.0f
+#define PWM_FREQ          20000
+
+#elifdef BLDC_MOSRAC_U3822
+#define POLE_PAIRS 7
+#define PHASE_RESISTANCE 2.3f
+#define KV_RATING 220
+#define L_Q 0.00086f
+#define SHUNT_OM 0.005f
+#define GAIN 40
+
+#define MAX_CURRENT       0.3f
+#define OPERATION_VOLTAGE 12.0f
+#define PWM_FREQ          20000
+
+#endif
+
 
 void printDrv8323Regs();
 uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data);
@@ -17,6 +50,8 @@ void checkFault();
 void rampACC(float target_speed, float acceleration_rate);
 void doRegisters(char *cmd);
 void GPIO_INIT();
+void drvReadAllRegs();
+void setup_DRV_registers (void);
 
 /**
      BLDCMotor class constructor
@@ -26,10 +61,14 @@ void GPIO_INIT();
      @param Lq  motor q-axis inductance - [H]
      @param Ld  motor d-axis inductance - [H]
      */
-BLDCMotor motor = BLDCMotor(7, 2.3, 220, 0.00086);
+BLDCMotor motor = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, L_Q);
 
 BLDCDriver6PWM driverBase = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
-LowsideCurrentSense current_sense = LowsideCurrentSense(0.005, 40, PA0, PA1, PA2);
+    /**
+      LowsideCurrentSense class constructor
+      @param shunt_resistor shunt resistor value
+      @param gain current-sense op-amp gain */
+LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM, GAIN, PA0, PA1, PA2);
 MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
 
 HardwareSerial Serial3(PB11, PB10);
@@ -40,8 +79,27 @@ Commander command = Commander(COM_OW);
 void doMotor(char *cmd) { command.motor(&motor, cmd); }
 
 
-void setup()
+// TrapezoidalPlanner planner = TrapezoidalPlanner(300, 10); // max velocity 500 rpm, acceleration 1000 rpm/s
+// TrapezoidalPlanner trapezoidal = TrapezoidalPlanner(5.0f, 1.0f, 0.25f, 0.2f);
+
+// float target_angle = 0.0f;
+
+// void onTarget(char* cmd){ command.scalar(&target_angle, cmd); trapezoidal.setTarget(target_angle); }
+
+// void doPlanner(char *cmd){
+//   planner.doTrapezoidalPlannerCommand(cmd);
+//   planner.
+// }
+void onTarget(char* cmd){ 
+    // get the target velocity in RPM
+    float target_velocity_RPM = atof(cmd);
+    // set the target velocity in radians per second
+    motor.target = target_velocity_RPM * _2PI/60;
+}
+//!SECTION
+void setup()  //SECTION - setup
 {
+  SimpleFOC_CORDIC_Config();      // initialize the CORDIC
   SPI_3.begin();
   Serial3.begin(921600);
   COM_OW.println("start");
@@ -54,60 +112,39 @@ void setup()
   digitalWrite(CAL_CURR, HIGH);
   _delay(100);
   digitalWrite(CAL_CURR, LOW);
-
+  //ANCHOR - command setup
+  command.add('M', doMotor, "motor");
   command.add('R', doRegisters, "change DRV8323 registers");
+  command.add('V', onTarget, "velocity in RPM");
 
+
+  // command.add('T', onTarget, "target angle");
+  // trapezoidal.setTarget(target_angle);
+
+  // ANCHOR - driver setup
   driverBase.enable();
   driverBase.init();
-  //________________________________________________________________DRV INIT
-  for (uint16_t i = 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
-  {
-    gDrv8323.CSA_Control.all = 0;
-    DRV8323_SPI_Read(&gDrv8323, i);
-    HAL_Delay(5);
-  }
+  setup_DRV_registers();
+  // power supply voltage [V]
+  driverBase.voltage_power_supply = OPERATION_VOLTAGE;
+  driverBase.pwm_frequency = PWM_FREQ;
+  // driverBase.dead_zone = 0.05f; // 5% dead time for both high and low side
 
-  gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_40;
-  gDrv8323.CSA_Control.bit.VREF_DIV = drv_vref_div_2;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
 
-  // 4. Настройка Driver Control (Режим ШИМ)  // Устанавливаем режим 6-PWM (00b)
-  gDrv8323.Driver_Control.bit.PWM_MODE = drv_PWM_mode_6;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
-
-  // 5. Настройка токов затвора (IDRIVE) под транзисторы BSZ014
-  // Для малого заряда затвора ставим 120mA / 240mA
-  gDrv8323.Gate_Drive_HS.bit.IDRIVEP_HS = drv_idriveP_hs_120mA;
-  gDrv8323.Gate_Drive_HS.bit.IDRIVEN_HS = drv_idriveN_hs_240mA;
-  // Разблокируем регистры (LOCK = 011b), если они были заблокированы
-  gDrv8323.Gate_Drive_HS.bit._LOCK = drv_unlock;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_HS_ADDR);
-
-  gDrv8323.Gate_Drive_LS.bit.IDRIVEP_LS = drv_idriveP_ls_120mA;
-  gDrv8323.Gate_Drive_LS.bit.IDRIVEN_LS = drv_idriveN_ls_240mA;
-  gDrv8323.Gate_Drive_LS.bit.TDRIVE = drv_tdrive_1000nS;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_LS_ADDR);
-
-  // 6. Настройка Dead Time и OCP // Устанавливаем Dead Time 200ns
-  gDrv8323.OCP_Control.bit.DEAD_TIME = drv_deadTime_100nS;
-  // Грубая защита VDS 0.26V
-  gDrv8323.OCP_Control.bit.VDS_LVL = drv_vds_lvl_260mV;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_OCP_CNTRL_ADDR);
-  //________________________________________________________________DRV INIT END
 
   // current_sense.linkDriver(&driver);
   current_sense.linkDriver(&driverBase);
   current_sense.init();
-  // power supply voltage [V]
-  driverBase.voltage_power_supply = 12;
-  driverBase.pwm_frequency = 45000;
 
   // motor.linkDriver(&driver);
   motor.linkDriver(&driverBase);
   motor.linkSensor(&observer);
 
-  motor.controller = MotionControlType::velocity_openloop;
+  // motor.controller = MotionControlType::velocity_openloop;
+  motor.controller = MotionControlType::angle_openloop;
   motor.torque_controller = TorqueControlType::foc_current;
+
+  // trapezoidal.linkMotor(motor);
 
   motor.linkCurrentSense(&current_sense);
   motor.useMonitoring(COM_OW);
@@ -115,47 +152,49 @@ void setup()
   // skip the sensor alignment
   motor.sensor_direction = Direction::CW;
   motor.zero_electric_angle = 0;
+  motor.velocity_limit = 500;     // rpm
 
   motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
   motor.monitor_downsample = 100; // default 10
 
-  motor.current_limit = 1; // amp
+  motor.current_limit = MAX_CURRENT; // amp
 
   motor.init();
   motor.initFOC();
 
-  // subscribe motor to the commander
-  command.add('M', doMotor, "motor");
+
 
   // Run user commands to configure and the motor (find the full command list in docs.simplefoc.com)
   COM_OW.println("Motor ready.");
   // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_6);
-  Serial3.print("System Clock: ");
-  Serial3.print(SystemCoreClock / 1000000);
-  Serial3.println(" MHz");
+  printf("System Clock: %lu Hz\n", SystemCoreClock);
   checkFault();
-  for (uint16_t i = 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
-  {
-    DRV8323_SPI_Read(&gDrv8323, i);
-    HAL_Delay(5);
-  }
+  drvReadAllRegs();
   printDrv8323Regs();
   // motor.velocity_limit = 500;     // rpm
   // motor.PID_velocity.limit = 0.3; // amp
   // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
   // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
-  _delay(500);
-}
 
-void loop()
+  _delay(100);
+} //!SECTION
+
+// int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
+// int32_t downsample_cnt = 0;
+
+void loop() //ANCHOR - LOOP
 {
+  // if (downsample > 0 && --downsample_cnt <= 0) {
+  //   motor.target = trapezoidal.run();
+  //   downsample_cnt = downsample;
+  // }
 
   motor.loopFOC();
   motor.move();
   command.run();
   motor.monitor();
 
-  checkFault();
+  // checkFault();
 }
 
 void rampACC(float target_speed, float acceleration_rate)
@@ -272,12 +311,7 @@ void doRegisters(char *cmd)
   {
     if (cmd[1] == 'A')
     {
-      for (uint16_t i = 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
-      {
-        gDrv8323.CSA_Control.all = 0;
-        DRV8323_SPI_Read(&gDrv8323, i);
-        HAL_Delay(5);
-      }
+      drvReadAllRegs();
       printDrv8323Regs();
     }
 
@@ -343,4 +377,45 @@ void GPIO_INIT()
   pinMode(CAL_CURR, OUTPUT);
   pinMode(DRV_CS, OUTPUT);
   
+}
+
+void drvReadAllRegs()
+{
+  for (uint16_t i = 0; i < DRV8323_CSA_CNTRL_ADDR + 1; i++)
+  {
+    gDrv8323.CSA_Control.all = 0;
+    DRV8323_SPI_Read(&gDrv8323, i);
+    HAL_Delay(5);
+  }
+}
+
+void setup_DRV_registers (void)
+{
+    //________________________________________________________________DRV INIT
+  drvReadAllRegs();
+
+  gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_40;
+  gDrv8323.CSA_Control.bit.VREF_DIV = drv_vref_div_2;
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+
+  gDrv8323.Driver_Control.bit.PWM_MODE = drv_PWM_mode_6;
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
+
+  gDrv8323.Gate_Drive_HS.bit.IDRIVEP_HS = drv_idriveP_hs_120mA;
+  gDrv8323.Gate_Drive_HS.bit.IDRIVEN_HS = drv_idriveN_hs_240mA;
+
+  gDrv8323.Gate_Drive_HS.bit._LOCK = drv_unlock;
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_HS_ADDR);
+
+  gDrv8323.Gate_Drive_LS.bit.IDRIVEP_LS = drv_idriveP_ls_120mA;
+  gDrv8323.Gate_Drive_LS.bit.IDRIVEN_LS = drv_idriveN_ls_240mA;
+  gDrv8323.Gate_Drive_LS.bit.TDRIVE = drv_tdrive_1000nS;
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_LS_ADDR);
+
+  // 6. Настройка Dead Time и OCP // Устанавливаем Dead Time 200ns
+  gDrv8323.OCP_Control.bit.DEAD_TIME = drv_deadTime_100nS;
+  // Грубая защита VDS 0.26V
+  gDrv8323.OCP_Control.bit.VDS_LVL = drv_vds_lvl_260mV;
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_OCP_CNTRL_ADDR);
+  //________________________________________________________________DRV INIT END
 }
