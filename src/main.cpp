@@ -7,10 +7,15 @@
 #include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
 #include "utilities/trapezoids/TrapezoidalPlanner.h"
 #include <SPI.h>
+#include <SimpleCANio.h>
+#include "comms/can/CANCommander.h" //https://github.com/simplefoc/Arduino-FOC-drivers/blob/feat_can_commander/examples/comms/can/can_example/can_example.ino
+// warning error https://community.simplefoc.com/t/stm32h750-low-side-current-measurement/7342/2
 // #include <drv832x.h>
 #include <drv8323rs.h>
 #include <LibPrintf.h>
 
+#define CAN_ID 228
+// #define USE_UART_COMMANDER
 #define BLDC_2804
 // #define BLDC_MOSRAC_U3822
 
@@ -28,15 +33,16 @@
 #define PWM_FREQ          20000
 
 #elifdef BLDC_MOSRAC_U3822
+
 #define POLE_PAIRS 7
-#define PHASE_RESISTANCE 2.3f
-#define KV_RATING 220
-#define L_Q 0.00086f
+#define PHASE_RESISTANCE 0.7f
+#define KV_RATING 1900
+#define L_Q 0.00004f
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       0.3f
-#define OPERATION_VOLTAGE 12.0f
+#define MAX_CURRENT       6.0f
+#define OPERATION_VOLTAGE 48.0f
 #define PWM_FREQ          20000
 
 #endif
@@ -75,9 +81,12 @@ HardwareSerial Serial3(PB11, PB10);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
 DRV8323_VARS_t gDrv8323 = DRV8323_DEFAULTS;
 
-Commander command = Commander(COM_OW);
-void doMotor(char *cmd) { command.motor(&motor, cmd); }
+CANio can = CANio(CAN_RX, CAN_TX, CAN_SHDN, CAN_ENABLE); // <- create SimpleCAN object
+CANCommander commander(can, CAN_ID);
 
+#ifdef USE_UART_COMMANDER
+Commander command = Commander(COM_OW);
+#endif
 
 // TrapezoidalPlanner planner = TrapezoidalPlanner(300, 10); // max velocity 500 rpm, acceleration 1000 rpm/s
 // TrapezoidalPlanner trapezoidal = TrapezoidalPlanner(5.0f, 1.0f, 0.25f, 0.2f);
@@ -87,9 +96,14 @@ void doMotor(char *cmd) { command.motor(&motor, cmd); }
 // void onTarget(char* cmd){ command.scalar(&target_angle, cmd); trapezoidal.setTarget(target_angle); }
 
 // void doPlanner(char *cmd){
-//   planner.doTrapezoidalPlannerCommand(cmd);
-//   planner.
-// }
+  //   planner.doTrapezoidalPlannerCommand(cmd);
+  //   planner.
+  // }
+  #ifdef USE_UART_COMMANDER
+void doMotor(char *cmd) { command.motor(&motor, cmd); }
+#endif
+// void doMotor(char *cmd) { commander.motor(&motor, cmd); }
+
 void onTarget(char* cmd){ 
     // get the target velocity in RPM
     float target_velocity_RPM = atof(cmd);
@@ -99,11 +113,11 @@ void onTarget(char* cmd){
 //!SECTION
 void setup()  //SECTION - setup
 {
+  printf_init(COM_OW);
   SimpleFOC_CORDIC_Config();      // initialize the CORDIC
   SPI_3.begin();
   Serial3.begin(921600);
   COM_OW.println("start");
-  printf_init(COM_OW);
   GPIO_INIT();
 
   digitalWrite(DRV_ENABLE, HIGH);
@@ -113,11 +127,17 @@ void setup()  //SECTION - setup
   _delay(100);
   digitalWrite(CAL_CURR, LOW);
   //ANCHOR - command setup
+  #ifdef USE_UART_COMMANDER
+  printf("COM_init\r\n");
   command.add('M', doMotor, "motor");
   command.add('R', doRegisters, "change DRV8323 registers");
   command.add('V', onTarget, "velocity in RPM");
-
-
+  #endif
+  printf("CAN_init\r\n");
+  commander.init();
+  printf("CAN_init_COMPL\r\n");
+  commander.addMotor(&motor);
+  printf("CAN_addmotor_COMPL\r\n");
   // command.add('T', onTarget, "target angle");
   // trapezoidal.setTarget(target_angle);
 
@@ -140,8 +160,8 @@ void setup()  //SECTION - setup
   motor.linkDriver(&driverBase);
   motor.linkSensor(&observer);
 
-  // motor.controller = MotionControlType::velocity_openloop;
-  motor.controller = MotionControlType::angle_openloop;
+  motor.controller = MotionControlType::velocity_openloop;
+  // motor.controller = MotionControlType::angle_openloop;
   motor.torque_controller = TorqueControlType::foc_current;
 
   // trapezoidal.linkMotor(motor);
@@ -191,8 +211,11 @@ void loop() //ANCHOR - LOOP
 
   motor.loopFOC();
   motor.move();
+  #ifdef USE_UART_COMMANDER
   command.run();
-  motor.monitor();
+  #endif
+  commander.run();
+  // motor.monitor();
 
   // checkFault();
 }

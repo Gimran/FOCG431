@@ -21,7 +21,10 @@ extern "C" {
 #define DRV_ENABLE PB7
 #define CAL_CURR   PB8
 
-
+#define CAN_SHDN NC
+#define CAN_ENABLE NC
+#define CAN_RX PA11
+#define CAN_TX PA12
 // #ifndef HIGH
 // #define HIGH                1
 // #endif
