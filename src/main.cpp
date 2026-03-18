@@ -15,9 +15,10 @@
 #include <LibPrintf.h>
 
 #define CAN_ID 228
-// #define USE_UART_COMMANDER
-#define BLDC_2804
-// #define BLDC_MOSRAC_U3822
+#define USE_UART_COMMANDER
+// #define USE_CAN_COMMANDER
+// #define BLDC_2804
+#define BLDC_MOSRAC_U3822
 
 #ifdef BLDC_2804
 #define POLE_PAIRS        7
@@ -41,8 +42,8 @@
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       6.0f
-#define OPERATION_VOLTAGE 48.0f
+#define MAX_CURRENT       2.0f
+#define OPERATION_VOLTAGE 44.0f
 #define PWM_FREQ          20000
 
 #endif
@@ -69,40 +70,38 @@ void setup_DRV_registers (void);
      */
 BLDCMotor motor = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, L_Q);
 
-BLDCDriver6PWM driverBase = BLDCDriver6PWM(PA10, PB15, PA9, PB14, PA8, PB13, PB7);
+BLDCDriver6PWM driverBase = BLDCDriver6PWM(DRV_PHASE_A_H, DRV_PHASE_A_L,
+                                           DRV_PHASE_B_H, DRV_PHASE_B_L, 
+                                           DRV_PHASE_C_H, DRV_PHASE_C_L, 
+                                           DRV_ENABLE);
     /**
       LowsideCurrentSense class constructor
       @param shunt_resistor shunt resistor value
       @param gain current-sense op-amp gain */
-LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM, GAIN, PA0, PA1, PA2);
+LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM, 
+                                                        GAIN, 
+                                                        DRV_PHASE_A_CUR, 
+                                                        DRV_PHASE_B_CUR, 
+                                                        DRV_PHASE_C_CUR);
 MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
 
-HardwareSerial Serial3(PB11, PB10);
+HardwareSerial Serial1(UART1_RX, UART1_TX);
+HardwareSerial Serial3(UART3_RX, UART3_TX);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
+
 DRV8323_VARS_t gDrv8323 = DRV8323_DEFAULTS;
 
-CANio can = CANio(CAN_RX, CAN_TX, CAN_SHDN, CAN_ENABLE); // <- create SimpleCAN object
-CANCommander commander(can, CAN_ID);
 
 #ifdef USE_UART_COMMANDER
-Commander command = Commander(COM_OW);
+Commander command = Commander(UART_COM);
+#elifdef USE_CAN_COMMANDER
+CANio can = CANio(CAN_RX, CAN_TX, CAN_SHDN, CAN_ENABLE); // <- create SimpleCAN object
+CANCommander commander(can, CAN_ID);
 #endif
 
-// TrapezoidalPlanner planner = TrapezoidalPlanner(300, 10); // max velocity 500 rpm, acceleration 1000 rpm/s
-// TrapezoidalPlanner trapezoidal = TrapezoidalPlanner(5.0f, 1.0f, 0.25f, 0.2f);
-
-// float target_angle = 0.0f;
-
-// void onTarget(char* cmd){ command.scalar(&target_angle, cmd); trapezoidal.setTarget(target_angle); }
-
-// void doPlanner(char *cmd){
-  //   planner.doTrapezoidalPlannerCommand(cmd);
-  //   planner.
-  // }
-  #ifdef USE_UART_COMMANDER
+#ifdef USE_UART_COMMANDER
 void doMotor(char *cmd) { command.motor(&motor, cmd); }
 #endif
-// void doMotor(char *cmd) { commander.motor(&motor, cmd); }
 
 void onTarget(char* cmd){ 
     // get the target velocity in RPM
@@ -113,32 +112,34 @@ void onTarget(char* cmd){
 //!SECTION
 void setup()  //SECTION - setup
 {
-  printf_init(COM_OW);
+  printf_init(UART_COM);
   SimpleFOC_CORDIC_Config();      // initialize the CORDIC
   SPI_3.begin();
   Serial3.begin(921600);
-  COM_OW.println("start");
+  UART_COM.println("start");
   GPIO_INIT();
+  digitalWrite(LED1, LOW);
 
   digitalWrite(DRV_ENABLE, HIGH);
   digitalWrite(DRV_CS, LOW);
 
-  digitalWrite(CAL_CURR, HIGH);
+  digitalWrite(DRV_CAL_AMP, HIGH);
   _delay(100);
-  digitalWrite(CAL_CURR, LOW);
+  digitalWrite(DRV_CAL_AMP, LOW);
   //ANCHOR - command setup
   #ifdef USE_UART_COMMANDER
   printf("COM_init\r\n");
   command.add('M', doMotor, "motor");
   command.add('R', doRegisters, "change DRV8323 registers");
   command.add('V', onTarget, "velocity in RPM");
-  #endif
+  #elifdef USE_CAN_COMMANDER
   printf("CAN_init\r\n");
   commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
   commander.init();
   printf("CAN_init_COMPL\r\n");
   commander.addMotor(&motor);
   printf("CAN_addmotor_COMPL\r\n");
+  #endif
   
   // command.add('T', onTarget, "target angle");
   // trapezoidal.setTarget(target_angle);
@@ -169,7 +170,7 @@ void setup()  //SECTION - setup
   // trapezoidal.linkMotor(motor);
 
   motor.linkCurrentSense(&current_sense);
-  motor.useMonitoring(COM_OW);
+  motor.useMonitoring(UART_COM);
 
   // skip the sensor alignment
   motor.sensor_direction = Direction::CW;
@@ -187,7 +188,7 @@ void setup()  //SECTION - setup
 
 
   // Run user commands to configure and the motor (find the full command list in docs.simplefoc.com)
-  COM_OW.println("Motor ready.");
+  UART_COM.println("Motor ready.");
   // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_6);
   printf("System Clock: %lu Hz\n", SystemCoreClock);
   checkFault();
@@ -197,7 +198,9 @@ void setup()  //SECTION - setup
   // motor.PID_velocity.limit = 0.3; // amp
   // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
   // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
+  #ifdef USE_CAN_COMMANDER
   commander.echo = true; // Echo received commands back to the sender
+  #endif
 
   _delay(100);
 } //!SECTION
@@ -216,8 +219,9 @@ void loop() //ANCHOR - LOOP
   motor.move();
   #ifdef USE_UART_COMMANDER
   command.run();
-  #endif
+  #elifdef USE_CAN_COMMANDER
   commander.run();
+  #endif
   // motor.monitor();
 
   // checkFault();
@@ -396,11 +400,15 @@ void doRegisters(char *cmd)
 
 void GPIO_INIT()
 {
-    pinMode(RS485_DIR_PIN, OUTPUT);
+  pinMode(RS485_DIR_PIN, OUTPUT);
+  pinMode(LED1, OUTPUT);  digitalWrite(LED1, HIGH);
+  pinMode(LED2, OUTPUT);  digitalWrite(LED2, HIGH);
+  pinMode(LED3, OUTPUT);  digitalWrite(LED3, HIGH);
+  pinMode(LED4, OUTPUT);  digitalWrite(LED4, HIGH);
 
   pinMode(DRV_NFAULT, INPUT);
   pinMode(DRV_ENABLE, OUTPUT);
-  pinMode(CAL_CURR, OUTPUT);
+  pinMode(DRV_CAL_AMP, OUTPUT);
   pinMode(DRV_CS, OUTPUT);
   
 }
