@@ -134,10 +134,12 @@ void setup()  //SECTION - setup
   command.add('V', onTarget, "velocity in RPM");
   #endif
   printf("CAN_init\r\n");
+  commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
   commander.init();
   printf("CAN_init_COMPL\r\n");
   commander.addMotor(&motor);
   printf("CAN_addmotor_COMPL\r\n");
+  
   // command.add('T', onTarget, "target angle");
   // trapezoidal.setTarget(target_angle);
 
@@ -195,6 +197,7 @@ void setup()  //SECTION - setup
   // motor.PID_velocity.limit = 0.3; // amp
   // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
   // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
+  commander.echo = true; // Echo received commands back to the sender
 
   _delay(100);
 } //!SECTION
