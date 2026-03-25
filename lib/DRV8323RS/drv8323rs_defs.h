@@ -456,4 +456,5 @@ typedef struct  {
 #ifdef __cplusplus
 }
 #endif /* extern "C" */
+
 #endif /* DRV8323_DEFS_H_ */

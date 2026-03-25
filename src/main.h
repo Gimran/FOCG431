@@ -63,14 +63,16 @@ extern "C" {
 // DRV pins
 #if defined(PCB_3200)
 #define DRV_CAL_AMP   PB8
+#define DRV_NFAULT PB6
 #elif defined(PCB_5410)
 #define DRV_CAL_AMP   PC15
+#define DRV_NFAULT PB8
 #endif
+
 #define DRV_PHASE_A_CUR PA0
 #define DRV_PHASE_B_CUR PA1
 #define DRV_PHASE_C_CUR PA2
 
-#define DRV_NFAULT PB6
 
 
 #define CAN_SHDN NC
@@ -86,6 +88,18 @@ extern "C" {
 #endif
 
 
+
+#define LED1_ON  digitalWrite(LED1, LOW);
+#define LED1_OFF digitalWrite(LED1, HIGH);
+#define LED2_ON  digitalWrite(LED2, LOW);
+#define LED2_OFF digitalWrite(LED2, HIGH);
+#define LED3_ON  digitalWrite(LED3, LOW);
+#define LED3_OFF digitalWrite(LED3, HIGH);
+#define LED4_ON  digitalWrite(LED4, LOW);
+#define LED4_OFF digitalWrite(LED4, HIGH);
+
+#define DRV_ENABLE_ON  digitalWrite(DRV_ENABLE, HIGH);
+#define DRV_ENABLE_OFF digitalWrite(DRV_ENABLE, LOW);
 #ifdef __cplusplus
 }
 #endif

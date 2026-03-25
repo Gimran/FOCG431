@@ -9,6 +9,58 @@
 			],
 			"group": "build",
 			"label": "PlatformIO: Build"
-		}
+		},
+		{
+            "label": "Reset_by_STCLI",
+            // Выполнение через командную строку
+            "type": "shell",
+            // "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+            "command": "& $env:STCLI -c port=SWD -Rst",
+            // "args": [
+            //   "-c port=SWD",
+            //   "-Rst"
+            // ],
+            "presentation": {
+            "echo": true,
+            "reveal": "always",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+            },
+            "group": "build",
+            "problemMatcher": []
+            
+        },
+		{
+            "label": "flash_by_STCLI",
+            // Выполнение через командную строку
+            "type": "shell",
+            // "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+            "command": "& $env:STCLI -c port=SWD -w .pio\\build\\genericSTM32G431CB\\firmware.bin 0x08000000 --start",
+            // "args": [
+            //   "-c port=SWD",
+            //   "-Rst"
+            // ],
+            "presentation": {
+            "echo": true,
+            "reveal": "always",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+            },
+            "group": "build",
+            "problemMatcher": []
+            
+        },
+		{
+            "label": "Clear_by_STCLI",
+            // Выполнение через командную строку
+            "type": "shell",
+            // "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+            "command": "& $env:STCLI -c port=SWD --erase all",
+            "group": "build"
+        }
 	]
 }

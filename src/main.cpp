@@ -13,40 +13,12 @@
 // #include <drv832x.h>
 #include <drv8323rs.h>
 #include <LibPrintf.h>
+#include "motor_settings.h"
 
 #define CAN_ID 228
 #define USE_UART_COMMANDER
 // #define USE_CAN_COMMANDER
-// #define BLDC_2804
-#define BLDC_MOSRAC_U3822
 
-#ifdef BLDC_2804
-#define POLE_PAIRS        7
-#define PHASE_RESISTANCE  2.3f
-#define KV_RATING         220
-#define L_Q               0.00086f
-
-#define SHUNT_OM          0.005f
-#define GAIN              40
-
-#define MAX_CURRENT       0.3f
-#define OPERATION_VOLTAGE 12.0f
-#define PWM_FREQ          20000
-
-#elifdef BLDC_MOSRAC_U3822
-
-#define POLE_PAIRS 7
-#define PHASE_RESISTANCE 0.7f
-#define KV_RATING 1900
-#define L_Q 0.00004f
-#define SHUNT_OM 0.005f
-#define GAIN 40
-
-#define MAX_CURRENT       2.0f
-#define OPERATION_VOLTAGE 44.0f
-#define PWM_FREQ          20000
-
-#endif
 
 
 void printDrv8323Regs();
@@ -56,9 +28,12 @@ void DRV8323_SPI_Write(DRV8323_VARS_t *v, uint16_t address);
 void checkFault();
 void rampACC(float target_speed, float acceleration_rate);
 void doRegisters(char *cmd);
+void doDriver(char *cmd);
 void GPIO_INIT();
 void drvReadAllRegs();
-void setup_DRV_registers (void);
+void setup_DRV_registers (uint8_t mode);
+void fault_ISR();
+void DRV_enable_ISR();
 
 /**
      BLDCMotor class constructor
@@ -85,7 +60,7 @@ LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM,
                                                         DRV_PHASE_C_CUR);
 MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
 
-HardwareSerial Serial1(UART1_RX, UART1_TX);
+// HardwareSerial Serial1(UART1_RX, UART1_TX);
 HardwareSerial Serial3(UART3_RX, UART3_TX);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
 
@@ -114,24 +89,31 @@ void setup()  //SECTION - setup
 {
   printf_init(UART_COM);
   SimpleFOC_CORDIC_Config();      // initialize the CORDIC
+  // SPI_3.setSSEL(DRV_CS);
   SPI_3.begin();
   Serial3.begin(921600);
   UART_COM.println("start");
   GPIO_INIT();
   digitalWrite(LED1, LOW);
 
-  digitalWrite(DRV_ENABLE, HIGH);
-  digitalWrite(DRV_CS, LOW);
-
-  digitalWrite(DRV_CAL_AMP, HIGH);
-  _delay(100);
-  digitalWrite(DRV_CAL_AMP, LOW);
+  // digitalWrite(DRV_ENABLE, HIGH);
+  // digitalWrite(DRV_CS, LOW);
+  
+  // digitalWrite(DRV_CAL_AMP, HIGH);
+  // _delay(50);
+  // digitalWrite(DRV_CAL_AMP, LOW);
+  // _delay(50);
+  
   //ANCHOR - command setup
   #ifdef USE_UART_COMMANDER
+  printf("\033[2J\033[H");
+  printf("%s / %s\r\n", __DATE__, __TIME__);
   printf("COM_init\r\n");
+  LED1_ON
   command.add('M', doMotor, "motor");
   command.add('R', doRegisters, "change DRV8323 registers");
   command.add('V', onTarget, "velocity in RPM");
+  command.add('D', doDriver, "change driver settings");
   #elifdef USE_CAN_COMMANDER
   printf("CAN_init\r\n");
   commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
@@ -140,60 +122,78 @@ void setup()  //SECTION - setup
   commander.addMotor(&motor);
   printf("CAN_addmotor_COMPL\r\n");
   #endif
+
+  // drvReadAllRegs();
+  // printDrv8323Regs();
+
   
-  // command.add('T', onTarget, "target angle");
-  // trapezoidal.setTarget(target_angle);
+
 
   // ANCHOR - driver setup
-  driverBase.enable();
-  driverBase.init();
-  setup_DRV_registers();
-  // power supply voltage [V]
   driverBase.voltage_power_supply = OPERATION_VOLTAGE;
   driverBase.pwm_frequency = PWM_FREQ;
+
+  driverBase.enable();
+  _delay(50);
+  setup_DRV_registers(1);
+  _delay(50);
+  drvReadAllRegs();
+  printDrv8323Regs();
+  // driverBase.disable();
+  _delay(50);
+  driverBase.init();
+  // digitalWrite(DRV_ENABLE, HIGH);
+  _delay(50);
+  // checkFault();
+  
+  
+
+
+  current_sense.linkDriver(&driverBase);
+  current_sense.init();
+  
+  // power supply voltage [V]
+  
   // driverBase.dead_zone = 0.05f; // 5% dead time for both high and low side
 
 
+  motor.voltage_sensor_align = 1.0;
+  
+  
+  // digitalWrite(DRV_ENABLE, HIGH);
+  // digitalWrite(DRV_PHASE_A_L, LOW);
+  // digitalWrite(DRV_PHASE_C_L, HIGH);
 
-  // current_sense.linkDriver(&driver);
-  current_sense.linkDriver(&driverBase);
-  current_sense.init();
-
-  // motor.linkDriver(&driver);
+    PhaseCurrent_s currents = current_sense.getPhaseCurrents();
+    printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
+                         currents.a, currents.b, currents.c);
+  
+  
+  
   motor.linkDriver(&driverBase);
   motor.linkSensor(&observer);
+  // /*
 
   motor.controller = MotionControlType::velocity_openloop;
   // motor.controller = MotionControlType::angle_openloop;
   motor.torque_controller = TorqueControlType::foc_current;
-
-  // trapezoidal.linkMotor(motor);
-
   motor.linkCurrentSense(&current_sense);
   motor.useMonitoring(UART_COM);
 
   // skip the sensor alignment
   motor.sensor_direction = Direction::CW;
   motor.zero_electric_angle = 0;
-  motor.velocity_limit = 500;     // rpm
+  // motor.velocity_limit = 500;     // rpm
 
   motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-  motor.monitor_downsample = 100; // default 10
+  // motor.monitor_downsample = 100; // default 10
 
   motor.current_limit = MAX_CURRENT; // amp
 
   motor.init();
-  motor.initFOC();
+  int motor_ready_flag = motor.initFOC();
+  if(motor_ready_flag){UART_COM.println("Motor ready.");}
 
-
-
-  // Run user commands to configure and the motor (find the full command list in docs.simplefoc.com)
-  UART_COM.println("Motor ready.");
-  // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_6);
-  printf("System Clock: %lu Hz\n", SystemCoreClock);
-  checkFault();
-  drvReadAllRegs();
-  printDrv8323Regs();
   // motor.velocity_limit = 500;     // rpm
   // motor.PID_velocity.limit = 0.3; // amp
   // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
@@ -203,6 +203,7 @@ void setup()  //SECTION - setup
   #endif
 
   _delay(100);
+  
 } //!SECTION
 
 // int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
@@ -225,6 +226,12 @@ void loop() //ANCHOR - LOOP
   // motor.monitor();
 
   // checkFault();
+
+  // PhaseCurrent_s currents = current_sense.getPhaseCurrents();
+  //   printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
+  //                        currents.a, currents.b, currents.c);
+    
+  //   delay(100);
 }
 
 void rampACC(float target_speed, float acceleration_rate)
@@ -257,11 +264,33 @@ void checkFault()
 {
   if (!digitalRead(DRV_NFAULT))
   {
-    Serial3.println(" FAULT!");
+    char buffer[33];
+    char buffer2[33];
+    Serial3.println(" FAULT INTERRUPT!");
+    // digitalWrite(DRV_ENABLE, HIGH);
+    _delay(10);
     DRV8323_SPI_Read(&gDrv8323, DRV8323_FAULT_STATUS_1_ADDR);
-    Serial3.print("Fault Status 1 register value: 0x");
-    Serial3.println(gDrv8323.Fault_Status_1.all, HEX);
-    digitalWrite(DRV_ENABLE, LOW); // Отключаем драйвер для безопасности
+    _delay(10);
+    DRV8323_SPI_Read(&gDrv8323, DRV8323_VGS_STATUS_2_ADDR);
+    // itoa(gDrv8323.Fault_Status_1.all, buffer, 2);
+    // printf("Fault_Status_1: %s\r\n", buffer);
+    printf("Fault_Status_1: 0x%X\r\n", gDrv8323.Fault_Status_1.all);
+    printf("VGS_Status_2: 0x%X\r\n", gDrv8323.VGS_Status_2.all);
+    // itoa(gDrv8323.VGS_Status_2.all, buffer2, 2);
+    // printf("VGS_Status_2: %s\r\n", buffer2);
+    printf("VDS_LA: \t VDS_HA: \t VDS_LB: \t VDS_HB: \t VDS_LC: \t VDS_HC:\r\n");
+    printf("%d\t\t %d\t\t %d\t\t %d\t\t %d\t\t %d\r\n",
+             gDrv8323.Fault_Status_1.bit.VDS_LA, gDrv8323.Fault_Status_1.bit.VDS_HA,
+             gDrv8323.Fault_Status_1.bit.VDS_LB, gDrv8323.Fault_Status_1.bit.VDS_HB,
+             gDrv8323.Fault_Status_1.bit.VDS_LC, gDrv8323.Fault_Status_1.bit.VDS_HC);
+    
+    printf("OTSD: %d\r\n", gDrv8323.Fault_Status_1.bit.OTSD);
+    printf("UVLO: %d\r\n", gDrv8323.Fault_Status_1.bit.UVLO);
+    printf("GDF: %d\r\n", gDrv8323.Fault_Status_1.bit.GDF);
+    printf("VDS_OCP: %d\r\n", gDrv8323.Fault_Status_1.bit.VDS_OCP);
+    // printf("FAULT: %d\r\n", gDrv8323.Fault_Status_1.bit.FAULT);
+    // digitalWrite(DRV_ENABLE, LOW); // Отключаем драйвер для безопасности
+    // delay(1000);
   }
 }
 
@@ -333,6 +362,37 @@ void printDrv8323Regs()
   Serial3.println("----------------------------------");
 }
 
+void doDriver(char *cmd)
+{
+  if (cmd[0] == 'E')
+  {
+    if (cmd[1] == '1')
+    {
+      printf("Enabling driver\r\n");
+      DRV_ENABLE_ON
+      // driverBase.enable();
+    }
+    else if (cmd[1] == '0')
+    {
+      printf("Disabling driver\r\n");
+      DRV_ENABLE_OFF
+      // driverBase.disable();
+    }
+  }
+  else if (cmd[0] == 'R')
+  {
+    if (cmd[1] == '1')
+    {
+      // driverBase.enable();
+      drvReadAllRegs();
+      gDrv8323.Driver_Control.bit.CLR_FLT = drv_clrFaults;
+      DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
+      printf("Cleared faults: FAULT_PIN:%d\r\n", digitalRead(DRV_NFAULT));
+      // driverBase.disable();
+    }
+  }
+  
+}
 
 void doRegisters(char *cmd)
 {
@@ -341,6 +401,7 @@ void doRegisters(char *cmd)
   {
     if (cmd[1] == 'A')
     {
+      DRV_ENABLE_ON
       drvReadAllRegs();
       printDrv8323Regs();
     }
@@ -401,13 +462,19 @@ void doRegisters(char *cmd)
 void GPIO_INIT()
 {
   pinMode(RS485_DIR_PIN, OUTPUT);
+  #if defined(PCB_5410)
   pinMode(LED1, OUTPUT);  digitalWrite(LED1, HIGH);
   pinMode(LED2, OUTPUT);  digitalWrite(LED2, HIGH);
   pinMode(LED3, OUTPUT);  digitalWrite(LED3, HIGH);
   pinMode(LED4, OUTPUT);  digitalWrite(LED4, HIGH);
+  #endif
+
 
   pinMode(DRV_NFAULT, INPUT);
+  attachInterrupt(digitalPinToInterrupt(DRV_NFAULT), fault_ISR, CHANGE);
   pinMode(DRV_ENABLE, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(DRV_ENABLE), DRV_enable_ISR, CHANGE);
+
   pinMode(DRV_CAL_AMP, OUTPUT);
   pinMode(DRV_CS, OUTPUT);
   
@@ -423,8 +490,10 @@ void drvReadAllRegs()
   }
 }
 
-void setup_DRV_registers (void)
+void setup_DRV_registers (uint8_t mode)
 {
+  if (mode == 0)
+  {
     //________________________________________________________________DRV INIT
   drvReadAllRegs();
 
@@ -439,11 +508,12 @@ void setup_DRV_registers (void)
   gDrv8323.Gate_Drive_HS.bit.IDRIVEN_HS = drv_idriveN_hs_240mA;
 
   gDrv8323.Gate_Drive_HS.bit._LOCK = drv_unlock;
-  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_HS_ADDR);
-
+  
   gDrv8323.Gate_Drive_LS.bit.IDRIVEP_LS = drv_idriveP_ls_120mA;
   gDrv8323.Gate_Drive_LS.bit.IDRIVEN_LS = drv_idriveN_ls_240mA;
   gDrv8323.Gate_Drive_LS.bit.TDRIVE = drv_tdrive_1000nS;
+
+  DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_HS_ADDR);
   DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_LS_ADDR);
 
   // 6. Настройка Dead Time и OCP // Устанавливаем Dead Time 200ns
@@ -452,4 +522,66 @@ void setup_DRV_registers (void)
   gDrv8323.OCP_Control.bit.VDS_LVL = drv_vds_lvl_260mV;
   DRV8323_SPI_Write(&gDrv8323, DRV8323_OCP_CNTRL_ADDR);
   //________________________________________________________________DRV INIT END
+  }
+  else if (mode == 1)
+  {
+    drvReadAllRegs();
+
+    // 1. Измерение тока
+    gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_40;
+    // gDrv8323.CSA_Control.bit.VREF_DIV = drv_vref_div_2;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
+
+    // 2. Режим управления
+    gDrv8323.Driver_Control.bit.PWM_MODE = drv_PWM_mode_6;
+    gDrv8323.Driver_Control.bit.CLR_FLT = drv_clrFaults;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
+
+    // 3. Накачка затворов (HS). Ток открытия ~1A, ток закрытия ~2A
+    gDrv8323.Gate_Drive_HS.bit.IDRIVEP_HS = drv_idriveP_hs_140mA;
+    gDrv8323.Gate_Drive_HS.bit.IDRIVEN_HS = drv_idriveN_hs_2000mA;
+    gDrv8323.Gate_Drive_HS.bit._LOCK = drv_unlock;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_HS_ADDR);
+    
+    // 4. Накачка затворов (LS) и время TDRIVE
+    gDrv8323.Gate_Drive_LS.bit.IDRIVEP_LS = drv_idriveP_ls_120mA;
+    gDrv8323.Gate_Drive_LS.bit.IDRIVEN_LS = drv_idriveN_ls_2000mA;
+    // TDRIVE = 2000ns. Даем больше времени тяжелому затвору на зарядку, чтобы избежать ошибки GDF
+    gDrv8323.Gate_Drive_LS.bit.TDRIVE = drv_tdrive_4000nS;
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_GATE_DRIVE_LS_ADDR);
+
+    // 5. Защита и тайминги
+    // Тяжелые ключи медленно закрываются. Увеличиваем Dead Time до 400ns во избежание сквозных токов
+    gDrv8323.OCP_Control.bit.DEAD_TIME = drv_deadTime_400nS;
+    
+    // Защита VDS. 0.26V / 0.004 Ом (Wayon Rds) = лимит ~65 Ампер. Этого хватит с запасом.
+    gDrv8323.OCP_Control.bit.VDS_LVL = drv_vds_lvl_1880mV;
+    gDrv8323.OCP_Control.bit.OCP_DEG = drv_ocp_deg_8us;
+    
+    DRV8323_SPI_Write(&gDrv8323, DRV8323_OCP_CNTRL_ADDR);
+  }
+ 
+}
+
+void fault_ISR()
+{
+  if (digitalRead(DRV_NFAULT))
+  {
+    LED4_OFF
+  } else
+  {
+    LED4_ON
+    checkFault();
+  }  
+}
+
+void DRV_enable_ISR()
+{
+  if (digitalRead(DRV_ENABLE))
+  {
+    LED3_ON
+  } else
+  {
+    LED3_OFF
+  }  
 }
