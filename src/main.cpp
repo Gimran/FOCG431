@@ -8,12 +8,11 @@
 #include "utilities/trapezoids/TrapezoidalPlanner.h"
 #include <SPI.h>
 #include <SimpleCANio.h>
-#include "comms/can/CANCommander.h" //https://github.com/simplefoc/Arduino-FOC-drivers/blob/feat_can_commander/examples/comms/can/can_example/can_example.ino
-// warning error https://community.simplefoc.com/t/stm32h750-low-side-current-measurement/7342/2
-// #include <drv832x.h>
+#include "comms/can/CANCommander.h"
 #include <drv8323rs.h>
 #include <LibPrintf.h>
 #include "motor_settings.h"
+#include "pin_defs.h"
 
 #define CAN_ID 228
 #define USE_UART_COMMANDER
