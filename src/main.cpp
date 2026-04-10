@@ -68,6 +68,28 @@ LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM,
                                                         DRV_PHASE_B_CUR, 
                                                         DRV_PHASE_C_CUR);
 // MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
+float mosSensorCallback(){
+  static float angle = 0.0f;
+  static float prev_angle = 0.0f;
+  static float send_angle = 0.0f;
+  angle = readMySensorCallback();
+  if (abs(angle - prev_angle) > 0.001)
+  {
+    prev_angle = angle;
+    send_angle = angle;
+  }
+  else
+  {
+    send_angle = prev_angle;
+    prev_angle = angle;
+  }
+  return send_angle;
+
+ // read my sensor
+ // return the angle value in radians in between 0 and 2PI
+ 
+//  return readMySensorCallback();
+}
 GenericSensor sensor = GenericSensor(readMySensorCallback);
 
 HardwareSerial Serial1(UART1_RX, UART1_TX);
@@ -207,8 +229,8 @@ void setup() // SECTION - setup
 	motor.useMonitoring(UART_COM);
 
 	// skip the sensor alignment
-	motor.sensor_direction = Direction::CW;
-	motor.zero_electric_angle = 0;
+	// motor.sensor_direction = Direction::CW;
+	// motor.zero_electric_angle = 0;
 	motor.velocity_limit = 100;     // rpm
 
 	motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
@@ -245,9 +267,9 @@ motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output 
 
 void loop() //ANCHOR - LOOP
 {
-  // sensor.update();
   motor.loopFOC();
   motor.move();
+  sensor.update();
   #ifdef USE_UART_COMMANDER
   command.run();
   #elifdef USE_CAN_COMMANDER
@@ -255,7 +277,7 @@ void loop() //ANCHOR - LOOP
   #endif
 
   updateVoltage();
-  motor.monitor();
+  // motor.monitor();
 
 }
 
