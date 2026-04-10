@@ -19,7 +19,7 @@ extern "C" {
 
 #define MAX_CURRENT       0.3f
 #define OPERATION_VOLTAGE 12.0f
-#define PWM_FREQ          10000
+#define PWM_FREQ          20000
 
 #elifdef BLDC_MOSRAC_U3822
 
@@ -30,8 +30,8 @@ extern "C" {
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       4.0f
-#define OPERATION_VOLTAGE 40.0f
+#define MAX_CURRENT       2.0f
+#define OPERATION_VOLTAGE 27.0f
 #define PWM_FREQ          20000
 
 #endif

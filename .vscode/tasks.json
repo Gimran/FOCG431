@@ -37,7 +37,7 @@
             // Выполнение через командную строку
             "type": "shell",
             // "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
-            "command": "& $env:STCLI -c port=SWD -w .pio\\build\\genericSTM32G431CB\\firmware.bin 0x08000000 --start",
+            "command": "& $env:STCLI -c  port=SWD sn=066AFF565653756687215232 -w .pio\\build\\genericSTM32G431CB\\firmware.bin 0x08000000 --start ",
             // "args": [
             //   "-c port=SWD",
             //   "-Rst"

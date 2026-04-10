@@ -9,6 +9,7 @@
 #define UART3_RX PB11
 #elif defined(PCB_5410)
 #define RS485_DIR_PIN PB9
+#define RS485_DIR_PORT GPIOB
 #define TEMP_SENSOR PA3
 #define VIN_VOLTAGE PB12
 #define UART3_TX PB10
@@ -70,3 +71,14 @@
 #define CAN_ENABLE NC
 #define CAN_RX PA11
 #define CAN_TX PA12
+
+#define SERIES_RESISTOR 10000.0f     // 10k pulldown
+#define NOMINAL_RESISTANCE 100000.0f // 100k при 25 градусах
+#define NOMINAL_TEMPERATURE 298.15f  // 25 градусов в Кельвинах
+#define B_COEFFICIENT 3950.0f        // Типовой B-коэффициент для NTC 100k
+#define ADC_MAX 4095.0f              // Для 12-битного АЦП
+
+// #define VOLTAGE_SENSOR VIN_VOLTAGE // Замени на свой пин
+#define R1_DIV 100000.0f   // Верхний резистор (к измеряемому напряжению)
+#define R2_DIV 6800.0f     // Нижний резистор (к земле)
+#define V_REF 3.3f         // Опорное напряжение (напряжение питания МК)

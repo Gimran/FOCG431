@@ -12,13 +12,14 @@
 #include <drv8323rs.h>
 #include <LibPrintf.h>
 #include "motor_settings.h"
-#include "pin_defs.h"
+// #include "pin_defs.h"
+#include "current_sense/hardware_specific/stm32/stm32_mcu.h"
+// #include "mosrac.h"
+#include "mbs_encoder.h"
 
 #define CAN_ID 228
 #define USE_UART_COMMANDER
 // #define USE_CAN_COMMANDER
-
-
 
 void printDrv8323Regs();
 uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data);
@@ -33,6 +34,15 @@ void drvReadAllRegs();
 void setup_DRV_registers (uint8_t mode);
 void fault_ISR();
 void DRV_enable_ISR();
+float getTemperature();
+float getVoltage();
+void updateVoltage();
+// void RS485_tx(uint8_t data, HardwareSerial &Serial);
+// float readMySensorCallback(void);
+// void Reset_pos_sensor();
+
+// UART_HandleTypeDef *phuart1; // Указатель на хэндл
+// DMA_HandleTypeDef hdma_usart1_rx;
 
 /**
      BLDCMotor class constructor
@@ -57,14 +67,14 @@ LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM,
                                                         DRV_PHASE_A_CUR, 
                                                         DRV_PHASE_B_CUR, 
                                                         DRV_PHASE_C_CUR);
-MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
+// MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
+GenericSensor sensor = GenericSensor(readMySensorCallback);
 
-// HardwareSerial Serial1(UART1_RX, UART1_TX);
+HardwareSerial Serial1(UART1_RX, UART1_TX);
 HardwareSerial Serial3(UART3_RX, UART3_TX);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
 
 DRV8323_VARS_t gDrv8323 = DRV8323_DEFAULTS;
-
 
 #ifdef USE_UART_COMMANDER
 Commander command = Commander(UART_COM);
@@ -83,138 +93,159 @@ void onTarget(char* cmd){
     // set the target velocity in radians per second
     motor.target = target_velocity_RPM * _2PI/60;
 }
-//!SECTION
-void setup()  //SECTION - setup
+//! SECTION
+void setup() // SECTION - setup
 {
-  printf_init(UART_COM);
-  SimpleFOC_CORDIC_Config();      // initialize the CORDIC
-  // SPI_3.setSSEL(DRV_CS);
-  SPI_3.begin();
-  Serial3.begin(921600);
-  UART_COM.println("start");
-  GPIO_INIT();
-  digitalWrite(LED1, LOW);
+	// ENC_Diag_t result = Decode_Encoder_Status(rx_buffer_enc[5]);
+	SimpleFOC_CORDIC_Config(); // initialize the CORDIC
+	GPIO_INIT();
+	// init_DMA_HAL();
 
-  // digitalWrite(DRV_ENABLE, HIGH);
-  // digitalWrite(DRV_CS, LOW);
-  
-  // digitalWrite(DRV_CAL_AMP, HIGH);
-  // _delay(50);
-  // digitalWrite(DRV_CAL_AMP, LOW);
-  // _delay(50);
-  
-  //ANCHOR - command setup
-  #ifdef USE_UART_COMMANDER
-  printf("\033[2J\033[H");
-  printf("%s / %s\r\n", __DATE__, __TIME__);
-  printf("COM_init\r\n");
-  LED1_ON
-  command.add('M', doMotor, "motor");
-  command.add('R', doRegisters, "change DRV8323 registers");
-  command.add('V', onTarget, "velocity in RPM");
-  command.add('D', doDriver, "change driver settings");
-  #elifdef USE_CAN_COMMANDER
-  printf("CAN_init\r\n");
-  commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
-  commander.init();
-  printf("CAN_init_COMPL\r\n");
-  commander.addMotor(&motor);
-  printf("CAN_addmotor_COMPL\r\n");
-  #endif
+	printf_init(UART_COM);
+	UART_COM.begin(115200);		while (!UART_COM);	
+	// UART_ENC.begin(2500000);	while (!UART_ENC);
+	// UART_ENC.setTimeout(10);
 
-  // drvReadAllRegs();
-  // printDrv8323Regs();
-
-  
+  UART_ENC.begin(ENC_SPEED);
+  pinMode(RS485_DIR_PIN, OUTPUT);
+  digitalWrite(RS485_DIR_PIN, LOW);  
 
 
-  // ANCHOR - driver setup
-  driverBase.voltage_power_supply = OPERATION_VOLTAGE;
-  driverBase.pwm_frequency = PWM_FREQ;
+	
+	//   HAL_UART_Receive_DMA(&UART_ENC, rx_buffer_enc, sizeof(rx_buffer_enc));
+	// RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
+	// RS485_tx(MBS_CMD_GET_POS_TEMP, UART_ENC);
+	// UART_ENC.readBytes(rx_buffer_enc, sizeof(rx_buffer_enc));
 
-  driverBase.enable();
-  _delay(50);
-  setup_DRV_registers(1);
-  _delay(50);
-  drvReadAllRegs();
-  printDrv8323Regs();
-  // driverBase.disable();
-  _delay(50);
-  driverBase.init();
-  // digitalWrite(DRV_ENABLE, HIGH);
-  _delay(50);
-  // checkFault();
-  
-  
+	// SPI_3.setSSEL(DRV_CS);
+	SPI_3.begin();
+	UART_COM.println("start");
+	LED1_ON
 
+  enc_dma_init(UART_ENC);
+  printf("enc_init_COMPL\r\n");
+  sensor.init();
+  printf("sensor_init_COMPL\r\n");
 
-  current_sense.linkDriver(&driverBase);
-  current_sense.init();
-  
-  // power supply voltage [V]
-  
-  // driverBase.dead_zone = 0.05f; // 5% dead time for both high and low side
+	// digitalWrite(DRV_ENABLE, HIGH);
+	// digitalWrite(DRV_CS, LOW);
 
+	digitalWrite(DRV_CAL_AMP, HIGH);
+	_delay(50);
+	digitalWrite(DRV_CAL_AMP, LOW);
+	_delay(50);
 
-  motor.voltage_sensor_align = 1.0;
-  
-  
-  // digitalWrite(DRV_ENABLE, HIGH);
-  // digitalWrite(DRV_PHASE_A_L, LOW);
-  // digitalWrite(DRV_PHASE_C_L, HIGH);
+// ANCHOR - command setup
+#ifdef USE_UART_COMMANDER
+	printf("\033[2J\033[H");
+	printf("%s / %s\r\n", __DATE__, __TIME__);
+	printf("COM_init\r\n");
+	LED1_ON
+	command.add('M', doMotor, "motor");
+	command.add('R', doRegisters, "change DRV8323 registers");
+	command.add('V', onTarget, "velocity in RPM");
+	command.add('D', doDriver, "change driver settings");
+#elifdef USE_CAN_COMMANDER
+	printf("CAN_init\r\n");
+	commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
+	commander.init();
+	printf("CAN_init_COMPL\r\n");
+	commander.addMotor(&motor);
+	printf("CAN_addmotor_COMPL\r\n");
+#endif
 
-    PhaseCurrent_s currents = current_sense.getPhaseCurrents();
-    printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
-                         currents.a, currents.b, currents.c);
-  
-  
-  
-  motor.linkDriver(&driverBase);
-  motor.linkSensor(&observer);
-  // /*
+	// drvReadAllRegs();
+	// printDrv8323Regs();
 
-  motor.controller = MotionControlType::velocity_openloop;
-  // motor.controller = MotionControlType::angle_openloop;
-  motor.torque_controller = TorqueControlType::foc_current;
-  motor.linkCurrentSense(&current_sense);
-  motor.useMonitoring(UART_COM);
+	// ANCHOR - driver setup
+	//   driverBase.voltage_power_supply = OPERATION_VOLTAGE;
+	driverBase.voltage_power_supply = getVoltage();
+	printf("Power supply voltage: %.2f V\r\n", driverBase.voltage_power_supply);
+	driverBase.pwm_frequency = PWM_FREQ;
 
-  // skip the sensor alignment
-  motor.sensor_direction = Direction::CW;
-  motor.zero_electric_angle = 0;
-  // motor.velocity_limit = 500;     // rpm
+	driverBase.enable();
+	_delay(50);
+	setup_DRV_registers(0);
+	_delay(100);
 
-  motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-  // motor.monitor_downsample = 100; // default 10
+	// driverBase.disable();
+	_delay(50);
+	driverBase.init();
+	// digitalWrite(DRV_ENABLE, HIGH);
+	_delay(50);
+	drvReadAllRegs();
+	printDrv8323Regs();
+	// checkFault();
 
-  motor.current_limit = MAX_CURRENT; // amp
+	current_sense.linkDriver(&driverBase);
+	current_sense.init();
 
-  motor.init();
-  int motor_ready_flag = motor.initFOC();
-  if(motor_ready_flag){UART_COM.println("Motor ready.");}
+	// power supply voltage [V]
 
-  // motor.velocity_limit = 500;     // rpm
-  // motor.PID_velocity.limit = 0.3; // amp
-  // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
-  // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
-  #ifdef USE_CAN_COMMANDER
-  commander.echo = true; // Echo received commands back to the sender
-  #endif
+	// driverBase.dead_zone = 0.05f; // 5% dead time for both high and low side
 
-  _delay(100);
-  
-} //!SECTION
+	//   motor.voltage_sensor_align = 2.0;
+
+	// digitalWrite(DRV_ENABLE, HIGH);
+	// digitalWrite(DRV_PHASE_A_L, LOW);
+	// digitalWrite(DRV_PHASE_C_L, HIGH);
+
+	PhaseCurrent_s currents = current_sense.getPhaseCurrents();
+	printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
+		   currents.a, currents.b, currents.c);
+
+	motor.linkDriver(&driverBase);
+	// motor.linkSensor(&observer);
+  motor.linkSensor(&sensor);
+	// /*
+
+	// motor.controller = MotionControlType::velocity_openloop;
+	// motor.controller = MotionControlType::angle_openloop;
+  motor.controller = MotionControlType::velocity;
+	motor.torque_controller = TorqueControlType::foc_current;
+	motor.linkCurrentSense(&current_sense);
+	motor.useMonitoring(UART_COM);
+
+	// skip the sensor alignment
+	motor.sensor_direction = Direction::CW;
+	motor.zero_electric_angle = 0;
+	motor.velocity_limit = 100;     // rpm
+
+	motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
+	motor.monitor_downsample = 100; // default 10
+
+	motor.current_limit = MAX_CURRENT; // amp
+
+	motor.init();
+	int motor_ready_flag = motor.initFOC();
+	if (motor_ready_flag)
+	{
+		UART_COM.println("Motor ready.");
+		LED2_ON
+	}
+
+// motor.velocity_limit = 500;     // rpm
+// motor.PID_velocity.limit = 0.3; // amp
+motor.PID_velocity.P = 0.2;
+motor.PID_velocity.I = 20;
+motor.LPF_velocity.Tf = 0.01;
+motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
+// motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
+#ifdef USE_CAN_COMMANDER
+	commander.echo = true; // Echo received commands back to the sender
+#endif
+
+	_delay(100);
+	// motor.disable();
+
+} //! SECTION
 
 // int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
 // int32_t downsample_cnt = 0;
 
 void loop() //ANCHOR - LOOP
 {
-  // if (downsample > 0 && --downsample_cnt <= 0) {
-  //   motor.target = trapezoidal.run();
-  //   downsample_cnt = downsample;
-  // }
-
+  // sensor.update();
   motor.loopFOC();
   motor.move();
   #ifdef USE_UART_COMMANDER
@@ -222,15 +253,10 @@ void loop() //ANCHOR - LOOP
   #elifdef USE_CAN_COMMANDER
   commander.run();
   #endif
-  // motor.monitor();
 
-  // checkFault();
+  updateVoltage();
+  motor.monitor();
 
-  // PhaseCurrent_s currents = current_sense.getPhaseCurrents();
-  //   printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
-  //                        currents.a, currents.b, currents.c);
-    
-  //   delay(100);
 }
 
 void rampACC(float target_speed, float acceleration_rate)
@@ -390,6 +416,85 @@ void doDriver(char *cmd)
       // driverBase.disable();
     }
   }
+    else if (cmd[0] == 'I')
+  {
+    if (cmd[1] == '1')
+    {
+		printf("Try motor INIT\r\n");
+		motor.init();
+		int motor_ready_flag = motor.initFOC();
+		if(motor_ready_flag){UART_COM.println("Motor ready.");}      
+    }
+  }
+      else if (cmd[0] == 'T')
+  {
+    if (cmd[1] == 'M')
+    {
+		printf("Motor temperature: %.2f *C (RAWpin_V: %.2f)\r\n", getTemperature(), _readRegularADCVoltage(TEMP_SENSOR));      
+    }
+	    else if (cmd[1] == 'V')
+    {
+		
+		printf("Motor voltage: %.2f V (RAWpin_V: %.2f)\r\n", getVoltage(), _readRegularADCVoltage(VIN_VOLTAGE));      
+    }
+  }
+  else if (cmd[0] == 'A')
+  {
+	if (cmd[1] == '0')
+	{
+		// readMySensorCallback();
+    float current_angle = readMySensorCallback();
+    printf("Current Angle (radians): %.5f\n", current_angle);
+		
+
+	// 		uint8_t mbs_cmd = MBS_CMD_GET_POS_STATUS;
+	// 		// while(UART_ENC.available()) UART_ENC.read();
+    // RS485_tx(mbs_cmd, UART_ENC);
+	// // UART_ENC.flush();
+	// UART_ENC.readBytes(rx_buffer_enc, 7);
+	// // TOFRcv.RAW = rx_buffer_enc;
+	// // strcpy(TOFRcv.RAW, rx_buffer_enc);
+
+	//             for (uint8_t ii=0; ii<8; ii++) {
+    //         printf("%02X ", rx_buffer_enc[ii]);
+    //         }
+    //         printf("\r\n");
+	
+
+	// ENC_Diag_t result = Decode_Encoder_Status(rx_buffer_enc[5]);
+	// //   float get_rad =  readMySensorCallback();
+	// //   printf("rad: %.2f rad / %.2f deg\r\n", get_rad, get_rad * 180.0 / PI);
+	// printf("turns:%d \t count %d \t angle %f \t rad %f \t  shaft %f \t CRC: %02X/%02X status:%02X %s\r\n",
+    //           Get_Multiturn(rx_buffer_enc),
+    //           Get_Singleturn(rx_buffer_enc),
+    //           Get_angle_degree(rx_buffer_enc),
+    //           Get_angle_radian(rx_buffer_enc),
+    //           Get_angle_shaft(Get_angle_degree(rx_buffer_enc),Get_Multiturn(rx_buffer_enc), 47),
+    //         //   Get_Packet_CRC(mbs_cmd,rx_buffer_enc),
+	// 		  rx_buffer_enc[0],
+    //           ML_ENC_CalcCRC(rx_buffer_enc, Get_CRC_position(mbs_cmd)),
+    //           Get_Status_Raw(rx_buffer_enc),
+    //           result.msg
+	// 		      );
+		// memset(rx_buffer_enc, 0, sizeof(rx_buffer_enc));
+	}
+	else if (cmd[1] == '1')
+	{	  
+		// RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
+	  printf("Reset angle\r\n");
+	}
+	else if (cmd[1] == '2')
+	{	  
+		// Reset_pos_sensor();
+		printf("Reset angle\r\n");
+	}
+	else if (cmd[1] == '3')
+	{
+	  printf("template\r\n");
+	}
+  }
+
+
   
 }
 
@@ -476,6 +581,10 @@ void GPIO_INIT()
 
   pinMode(DRV_CAL_AMP, OUTPUT);
   pinMode(DRV_CS, OUTPUT);
+
+//   analogReadResolution(12);
+//   pinMode(TEMP_SENSOR, INPUT_ANALOG);
+//   pinMode(VIN_VOLTAGE, INPUT_ANALOG);
   
 }
 
@@ -499,8 +608,9 @@ void setup_DRV_registers (uint8_t mode)
   gDrv8323.CSA_Control.bit.CSA_GAIN = drv_gain_40;
   gDrv8323.CSA_Control.bit.VREF_DIV = drv_vref_div_2;
   DRV8323_SPI_Write(&gDrv8323, DRV8323_CSA_CNTRL_ADDR);
-
+  
   gDrv8323.Driver_Control.bit.PWM_MODE = drv_PWM_mode_6;
+  gDrv8323.Driver_Control.bit.CLR_FLT = drv_clrFaults;
   DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
 
   gDrv8323.Gate_Drive_HS.bit.IDRIVEP_HS = drv_idriveP_hs_120mA;
@@ -584,3 +694,152 @@ void DRV_enable_ISR()
     LED3_OFF
   }  
 }
+
+float getTemperature() {
+    float v_out = _readRegularADCVoltage(TEMP_SENSOR);    
+    // Защита от деления на 0 при замыкании на землю
+    if (v_out <= 0.001f) return -273.15f;
+
+    // Расчет сопротивления термистора для схемы с pulldown
+    // R_ntc = R_series * ( (ADC_MAX / ADC_VAL) - 1 )
+    float r_ntc = SERIES_RESISTOR * ((ADC_MAX / ((V_REF / v_out) - 1.0f)));
+
+    // Расчет по упрощенному уравнению Стейнхарта-Харта (через B-коэффициент)
+    float temp = r_ntc / NOMINAL_RESISTANCE; 
+    temp = log(temp);                        
+    temp /= B_COEFFICIENT;                   
+    temp += 1.0f / NOMINAL_TEMPERATURE;      
+    temp = 1.0f / temp;                      // Температура в Кельвинах
+    temp -= 273.15f;                         // Перевод в Градусы Цельсия
+
+    return temp;
+}
+
+float getVoltage() {    
+    float v_pin = _readRegularADCVoltage(VIN_VOLTAGE);
+    float v_in = v_pin * ((R1_DIV + R2_DIV) / R2_DIV);    
+    return v_in;
+}
+
+void updateVoltage() {
+	uint32_t now = millis();
+	static uint32_t last_sensor_time = 0;
+	static float last_voltage;
+
+	if (now - last_sensor_time >= 500) {
+		last_sensor_time = now;
+		if (fabs(last_voltage - getVoltage()) > 1.0f) {
+			printf("Voltage changed: %.2f V\r\n", getVoltage());
+			driverBase.voltage_power_supply = getVoltage();
+		}
+		last_voltage = getVoltage();
+	}
+}
+
+// void RS485_tx(uint8_t data, HardwareSerial &Serialll)
+// {
+// 	digitalWrite(RS485_DIR_PIN, HIGH);
+// 	size_t length = sizeof(data);
+// 	Serialll.write(&data, length);
+// 	Serialll.flush(); // Ensure all data is sent before switching back to receive mode
+//   // delayMicroseconds(10); // Short delay to allow the last byte to be transmitted
+// 	digitalWrite(RS485_DIR_PIN, LOW);
+// }
+
+// float readMySensorCallback(void){
+// 	// float angle_rad = 0.0f;
+//   while(UART_ENC.available()) UART_ENC.read();
+//   __HAL_UART_CLEAR_OREFLAG(phuart1);
+//   // UART_ENC.setTimeout(100);
+// 	uint8_t mbs_cmd = MBS_CMD_GET_POS_TEMP;
+// 	while(UART_ENC.available()) UART_ENC.read();
+// 	RS485_tx(mbs_cmd, UART_ENC);
+
+//   uint8_t count = 0;
+//   uint32_t timeout = 100; // Примерный счетчи
+//   USART_TypeDef *base = (USART_TypeDef *)UART_ENC.getHandle()->Instance;
+
+//   while (count < 7 && timeout-- > 0) {
+//     // Проверяем флаг RXNE (регистр данных не пуст)
+//     if (base->ISR & USART_ISR_RXNE) { 
+//       rx_buffer_enc[count++] = base->RDR; // Читаем напрямую из регистра
+//     }
+//   }
+
+// 	  // u_int8_t bytesRead = UART_ENC.readBytes(rx_buffer_enc, 7);
+  
+
+// 	// if(CRC_is_OK(mbs_cmd, rx_buffer_enc))
+// 	// {
+// 	// 	angle_rad = Get_angle_radian(rx_buffer_enc);
+// 	// }
+//   	printf("RAW: ");
+//                 for (uint8_t i = 0; i < 8; i++) {
+//                     printf("%02X ", (uint8_t)rx_buffer_enc[i]);
+//                 } printf("\r\n");
+// 	return Get_angle_radian(rx_buffer_enc);
+// }
+
+// float readMySensorCallback(void) {
+//     static float last_angle_rad = 0.0f; 
+//     static uint32_t debug_counter = 0; 
+//     uint8_t mbs_cmd = MBS_CMD_GET_POS_STATUS;
+
+//     // 1. Очистка буфера и сброс ошибки
+//     __HAL_UART_CLEAR_OREFLAG(phuart1);
+//     volatile uint8_t dummy = phuart1->Instance->RDR; 
+
+//     // 2. Отправка команды
+//     digitalWrite(RS485_DIR_PIN, HIGH);
+//     HAL_UART_Transmit(phuart1, &mbs_cmd, 1, 2); 
+//     digitalWrite(RS485_DIR_PIN, LOW);
+
+//     // 3. Запуск DMA приема
+//     if (HAL_UART_Receive_DMA(phuart1, rx_buffer_enc, 7) == HAL_OK) {
+        
+//         // 4. Ожидание пакета
+//         uint32_t start_time = micros();
+//         while (phuart1->RxState != HAL_UART_STATE_READY) {
+//             if ((micros() - start_time) > 200) { 
+//                 HAL_UART_DMAStop(phuart1);       
+//                 break;
+//             }
+//         }
+
+//         // 5. Проверка и вывод
+//         if (phuart1->RxState == HAL_UART_STATE_READY) {
+            
+
+                
+                
+//                 if (CRC_is_OK(mbs_cmd, rx_buffer_enc)) {
+//                     printf(" | CRC: OK\r\n");
+//                 } else {
+//                     printf(" | CRC: ERROR\r\n");
+//                 }
+                
+//                 // debug_counter = 0;
+            
+
+//             if (CRC_is_OK(mbs_cmd, rx_buffer_enc)) {
+//                 last_angle_rad = Get_angle_radian(rx_buffer_enc);
+//             }
+//         }
+//     }
+// 	printf("RAW: ");
+//                 for (uint8_t i = 0; i < 8; i++) {
+//                     printf("%02X ", rx_buffer_enc[i]);
+//                 } printf("\r\n");
+
+//     return last_angle_rad;
+// }
+
+// void Reset_pos_sensor(){
+// 	for (uint8_t i = 0; i < 5; i++)
+// 	{
+// 	RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
+// 	delayMicroseconds(50);
+// 	RS485_tx(MBS_CMD_GET_POS, UART_ENC);
+// 	delayMicroseconds(50);
+// 	}
+// }
