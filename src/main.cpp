@@ -67,7 +67,8 @@ LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM,
                                                         DRV_PHASE_A_CUR, 
                                                         DRV_PHASE_B_CUR, 
                                                         DRV_PHASE_C_CUR);
-// MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
+
+#ifdef USE_ENCODER
 float mosSensorCallback(){
   static float angle = 0.0f;
   static float prev_angle = 0.0f;
@@ -85,13 +86,14 @@ float mosSensorCallback(){
   }
   return send_angle;
 
- // read my sensor
- // return the angle value in radians in between 0 and 2PI
- 
-//  return readMySensorCallback();
 }
-GenericSensor sensor = GenericSensor(readMySensorCallback);
 
+GenericSensor sensor = GenericSensor(readMySensorCallback);
+#else
+MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer sensor instance
+#endif
+
+//
 HardwareSerial Serial1(UART1_RX, UART1_TX);
 HardwareSerial Serial3(UART3_RX, UART3_TX);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
@@ -146,7 +148,9 @@ void setup() // SECTION - setup
 
   enc_dma_init(UART_ENC);
   printf("enc_init_COMPL\r\n");
+  #ifdef USE_ENCODER
   sensor.init();
+  #endif
   printf("sensor_init_COMPL\r\n");
 
 	// digitalWrite(DRV_ENABLE, HIGH);
@@ -217,20 +221,27 @@ void setup() // SECTION - setup
 		   currents.a, currents.b, currents.c);
 
 	motor.linkDriver(&driverBase);
-	// motor.linkSensor(&observer);
+  #ifdef USE_ENCODER
   motor.linkSensor(&sensor);
+  #else
+	motor.linkSensor(&observer);
+  #endif
+
 	// /*
 
-	// motor.controller = MotionControlType::velocity_openloop;
+	motor.controller = MotionControlType::velocity_openloop;
 	// motor.controller = MotionControlType::angle_openloop;
-  motor.controller = MotionControlType::velocity;
+  // motor.controller = MotionControlType::velocity;
 	motor.torque_controller = TorqueControlType::foc_current;
 	motor.linkCurrentSense(&current_sense);
 	motor.useMonitoring(UART_COM);
 
+  #ifndef USE_ENCODER
 	// skip the sensor alignment
-	// motor.sensor_direction = Direction::CW;
-	// motor.zero_electric_angle = 0;
+	motor.sensor_direction = Direction::CW;
+	motor.zero_electric_angle = 0;
+  // motor.skip_align = true;
+  #endif
 	motor.velocity_limit = 100;     // rpm
 
 	motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
@@ -269,7 +280,7 @@ void loop() //ANCHOR - LOOP
 {
   motor.loopFOC();
   motor.move();
-  sensor.update();
+  // sensor.update();
   #ifdef USE_UART_COMMANDER
   command.run();
   #elifdef USE_CAN_COMMANDER
@@ -277,7 +288,7 @@ void loop() //ANCHOR - LOOP
   #endif
 
   updateVoltage();
-  // motor.monitor();
+  motor.monitor();
 
 }
 
