@@ -38,7 +38,7 @@ void fault_ISR();
 void DRV_enable_ISR();
 float getTemperature();
 float getVoltage();
-void updateVoltage();
+void updateVoltageTemp();
 // void RS485_tx(uint8_t data, HardwareSerial &Serial);
 // float readMySensorCallback(void);
 // void Reset_pos_sensor();
@@ -204,12 +204,7 @@ void setup() // SECTION - setup
 	motor.linkSensor(&observer);
   #endif
 
-	// /*
 
-	// motor.controller = MotionControlType::velocity_openloop;
-	// motor.controller = MotionControlType::angle_openloop;
-  motor.controller = MotionControlType::velocity;
-	motor.torque_controller = TorqueControlType::foc_current;
 	motor.linkCurrentSense(&current_sense);
 	motor.useMonitoring(UART_COM);
 
@@ -227,6 +222,9 @@ void setup() // SECTION - setup
 	motor.current_limit = MAX_CURRENT; // amp
 
 	motor.init();
+  float bandwidth = 150.0f; // Hz
+  // int res = motor.tuneCurrentController(bandwidth);
+
 	int motor_ready_flag = motor.initFOC();
 	if (motor_ready_flag)
 	{
@@ -248,10 +246,14 @@ void setup() // SECTION - setup
 // motor.LPF_velocity.Tf = 0.01;
 // motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
 // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
-motor.LPF_current_d = 0.001f;
-motor.LPF_current_q = 0.001f;
+  motor.controller = MotionControlType::velocity;
+	motor.torque_controller = TorqueControlType::foc_current;
+motor.LPF_current_d = 0.0f;
+motor.LPF_current_q = 0.0f;
 motor.LPF_velocity.Tf = 0.0f;
 motor.PID_velocity.P = 5.0f;
+motor.PID_current_q.P = 0.04f;
+motor.PID_current_q.I = 500.0f;
 #ifdef USE_CAN_COMMANDER
 	commander.echo = true; // Echo received commands back to the sender
 #endif
@@ -275,7 +277,7 @@ void loop() //ANCHOR - LOOP
   commander.run();
   #endif
 
-  updateVoltage();
+  updateVoltageTemp();
   // motor.monitor();
 
 }
@@ -334,9 +336,6 @@ void checkFault()
     printf("UVLO: %d\r\n", gDrv8323.Fault_Status_1.bit.UVLO);
     printf("GDF: %d\r\n", gDrv8323.Fault_Status_1.bit.GDF);
     printf("VDS_OCP: %d\r\n", gDrv8323.Fault_Status_1.bit.VDS_OCP);
-    // printf("FAULT: %d\r\n", gDrv8323.Fault_Status_1.bit.FAULT);
-    // digitalWrite(DRV_ENABLE, LOW); // Отключаем драйвер для безопасности
-    // delay(1000);
   }
 }
 
@@ -668,8 +667,11 @@ void fault_ISR()
     LED4_OFF
   } else
   {
+    if(motor.enabled)
+    {
     LED4_ON
     checkFault();
+    }
   }  
 }
 
@@ -711,17 +713,26 @@ float getVoltage() {
     return v_in;
 }
 
-void updateVoltage() {
+void updateVoltageTemp() {
 	uint32_t now = millis();
 	static uint32_t last_sensor_time = 0;
 	static float last_voltage;
+  static float now_voltage;
+  now_voltage = getVoltage();
+
 
 	if (now - last_sensor_time >= 500) {
 		last_sensor_time = now;
-		if (fabs(last_voltage - getVoltage()) > 1.0f) {
-			printf("Voltage changed: %.2f V\r\n", getVoltage());
-			driverBase.voltage_power_supply = getVoltage();
+		if (fabs(last_voltage - now_voltage) > 2.0f) {
+			printf("Voltage changed: %.2f V\r\n", now_voltage);
+			driverBase.voltage_power_supply = now_voltage;
 		}
-		last_voltage = getVoltage();
+		last_voltage = now_voltage;
+    float temp = getTemperature();
+    if (temp > CRITICAL_MOTOR_TEMP)
+    {
+      driverBase.disable();
+      printf("Critical motor temperature reached: %.2f *C. Driver disabled.\r\n", temp);
+    }    
 	}
 }

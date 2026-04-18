@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 
+#define CRITICAL_MOTOR_TEMP 70.0f
 
 // #define BLDC_2804
 // #define BLDC_MOSRAC_U3822
@@ -45,8 +46,8 @@ extern "C" {
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       0.30f
-#define OPERATION_VOLTAGE 20.0f
+#define MAX_CURRENT       1.0f
+#define OPERATION_VOLTAGE 46.0f
 #define PWM_FREQ          20000
 #endif
 
