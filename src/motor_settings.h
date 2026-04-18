@@ -41,14 +41,14 @@ extern "C" {
 
 #define POLE_PAIRS 10
 #define PHASE_RESISTANCE 0.54f
-#define KV_RATING 1900
-#define L_Q 0.00004f
+#define KV_RATING 110
+#define L_Q 0.0004f
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       1.0f
+#define MAX_CURRENT       1.30f
 #define OPERATION_VOLTAGE 46.0f
-#define PWM_FREQ          20000
+#define PWM_FREQ          40000
 #endif
 
 

@@ -13,7 +13,7 @@ extern "C" {
 #define UART_ENC Serial1
 
 #define ENC_SPEED 2500000
-#define PC_SPEED 256000
+#define PC_SPEED 921600
 
 //TODO - move to gpio lib
 #if defined(PCB_3200)

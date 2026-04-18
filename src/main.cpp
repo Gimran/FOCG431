@@ -214,12 +214,42 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	// motor.velocity_limit = 100;     // rpm
+	motor.velocity_limit = 1000;     // rpm
 
-	motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-	motor.monitor_downsample = 100; // default 10
+	motor.monitor_variables = _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
+	motor.monitor_downsample = 1000; // default 10
 
 	motor.current_limit = MAX_CURRENT; // amp
+    motor.controller = MotionControlType::velocity;
+	motor.torque_controller = TorqueControlType::foc_current;
+motor.LPF_current_d = 0.0f;
+motor.LPF_current_q = 0.0f;
+motor.LPF_velocity.Tf = 0.0f;
+motor.PID_velocity.P = 5.0f;
+motor.PID_current_q.P = 0.04f;
+motor.PID_current_q.I = 500.0f;
+// current q loop PID 
+motor.PID_current_q.P = 0.4;
+motor.PID_current_q.I = 0.2;
+motor.PID_current_q.D = 0.0;
+motor.PID_current_q.output_ramp = 0.0;
+motor.PID_current_q.limit = 12.0;
+// Low pass filtering time constant 
+motor.LPF_current_q.Tf = 0.0;
+// current d loop PID
+motor.PID_current_d.P = 0.4;
+motor.PID_current_d.I = 0.2;
+motor.PID_current_d.D = 0.0;
+motor.PID_current_d.output_ramp = 0.0;
+motor.PID_current_d.limit = 12.0;
+
+// motor.velocity_limit = 500;     // rpm
+// motor.PID_velocity.limit = 0.3; // amp
+// motor.PID_velocity.P = 0.2;
+// motor.PID_velocity.I = 20;
+// motor.LPF_velocity.Tf = 0.01;
+// motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
+// motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
 
 	motor.init();
   float bandwidth = 150.0f; // Hz
@@ -239,26 +269,13 @@ void setup() // SECTION - setup
 		LED2_ON
 	}
 
-// motor.velocity_limit = 500;     // rpm
-// motor.PID_velocity.limit = 0.3; // amp
-// motor.PID_velocity.P = 0.2;
-// motor.PID_velocity.I = 20;
-// motor.LPF_velocity.Tf = 0.01;
-// motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
-// motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
-  motor.controller = MotionControlType::velocity;
-	motor.torque_controller = TorqueControlType::foc_current;
-motor.LPF_current_d = 0.0f;
-motor.LPF_current_q = 0.0f;
-motor.LPF_velocity.Tf = 0.0f;
-motor.PID_velocity.P = 5.0f;
-motor.PID_current_q.P = 0.04f;
-motor.PID_current_q.I = 500.0f;
+
+
 #ifdef USE_CAN_COMMANDER
 	commander.echo = true; // Echo received commands back to the sender
 #endif
 
-	_delay(100);
+	// _delay(100);
 	// motor.disable();
 
 } //! SECTION
@@ -649,7 +666,7 @@ void setup_DRV_registers (uint8_t mode)
 
     // 5. Защита и тайминги
     // Тяжелые ключи медленно закрываются. Увеличиваем Dead Time до 400ns во избежание сквозных токов
-    gDrv8323.OCP_Control.bit.DEAD_TIME = drv_deadTime_400nS;
+    gDrv8323.OCP_Control.bit.DEAD_TIME = drv_deadTime_200nS;
     
     // Защита VDS. 0.26V / 0.004 Ом (Wayon Rds) = лимит ~65 Ампер. Этого хватит с запасом.
     gDrv8323.OCP_Control.bit.VDS_LVL = drv_vds_lvl_1880mV;
