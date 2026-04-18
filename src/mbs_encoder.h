@@ -9,8 +9,16 @@
 #define MBS_CMD_GET_POS_RPM        0x73
 #define MBS_CMD_GET_POS_TEMP       0x74
 
+typedef struct mbs_data {
+    float angle;
+    float rpm;
+    uint8_t status;
+} mbs_data_t;
+
 void enc_dma_init(HardwareSerial &Serial_enc);
-float readMySensorCallback(void);
+float readMySensorCallback();
+float Get_RPM(void);
+
 
 typedef struct __attribute__((packed)) {
     uint8_t over_speed     : 1;
@@ -96,9 +104,19 @@ static inline float Get_angle_degree(volatile uint8_t *raw){
 }
 
 static inline float Get_angle_radian(volatile uint8_t *raw) {
+    // uint32_t clean_data = Get_Singleturn(raw);
+
     // 0.00004793689f это (2 * PI) / 131072
-    return (float)Get_Singleturn(raw) * 0.00004793689f;
+    return (float)(((Get_Singleturn(raw) * 0.00004793689f)*100.0f)/100.0f);
 }
+
+// static inline float Get_angle_radian(volatile uint8_t *raw) {
+//     // 1. Срезаем 1 шумный бит (17 бит -> 16 бит)
+//     uint32_t clean_data = Get_Singleturn(raw) >> 2;
+    
+//     // 2. Новый коэффициент: (2 * PI) / 65536 = 0.00009587379f
+//     return (float)clean_data * 0.00009587379f;
+// }
 
 static inline float Get_angle_shaft(float angle_degree, uint32_t multiturn, uint16_t ratio){
     return (((multiturn * 360.0f) + angle_degree )/ (float)ratio);

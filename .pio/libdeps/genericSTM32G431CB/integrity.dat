@@ -1,0 +1,4 @@
+https://github.com/simplefoc/Arduino-FOC-drivers.git#feat_can_commander
+https://github.com/simplefoc/SimpleCANio.git
+askuric/Simple FOC@^2.4.0
+embeddedartistry/LibPrintf@^1.2.13

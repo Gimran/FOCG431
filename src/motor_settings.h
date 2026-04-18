@@ -8,7 +8,7 @@ extern "C" {
 // #define BLDC_2804
 // #define BLDC_MOSRAC_U3822
 #define BLDC_MOSRAC_U6017
-// #define USE_ENCODER
+#define USE_ENCODER
 
 #ifdef BLDC_2804
 #define POLE_PAIRS        7
@@ -45,8 +45,8 @@ extern "C" {
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       0.5f
-#define OPERATION_VOLTAGE 48.0f
+#define MAX_CURRENT       0.30f
+#define OPERATION_VOLTAGE 20.0f
 #define PWM_FREQ          20000
 #endif
 

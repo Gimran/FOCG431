@@ -2,9 +2,11 @@
 #include "stm32g4xx_ll_dma.h"
 #include "stm32g4xx_ll_dmamux.h"
 #include <LibPrintf.h>
+#include "pin_defs.h"
 
 USART_TypeDef *UartEncBase;
-volatile uint8_t rx_buffer[10];
+// volatile uint8_t rx_buffer[10];
+volatile uint8_t rx_buffer_mbs[10];
 
 void enc_dma_init(HardwareSerial &Serial_enc) {
     UartEncBase = (USART_TypeDef *)Serial_enc.getHandle()->Instance;
@@ -27,9 +29,10 @@ void enc_dma_init(HardwareSerial &Serial_enc) {
     LL_DMA_SetMemorySize(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MDATAALIGN_BYTE);
 }
 
-float readMySensorCallback(void) {
+float readMySensorCallback() {
     static float last_angle = 0.0f; 
-    uint8_t cmd = MBS_CMD_GET_POS; 
+    static float last_RPM = 0.0f; 
+    uint8_t cmd = MBS_CMD_GET_POS_RPM;
     
     uint8_t expected_payload = Get_CRC_Position(cmd) + 1; 
     
@@ -42,7 +45,7 @@ float readMySensorCallback(void) {
     }
 
     LL_DMA_SetPeriphAddress(DMA1, LL_DMA_CHANNEL_1, (uint32_t)&UartEncBase->RDR);
-    LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_1, (uint32_t)rx_buffer);
+    LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_1, (uint32_t)rx_buffer_mbs);
     LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, expected_payload);
     
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_1);
@@ -62,15 +65,23 @@ float readMySensorCallback(void) {
     uint8_t received = expected_payload - LL_DMA_GetDataLength(DMA1, LL_DMA_CHANNEL_1);
 
     if (received == expected_payload) {
-        uint8_t crc_calc = Calc_CRC8((uint8_t*)rx_buffer, expected_payload - 1);
-        if (crc_calc == rx_buffer[expected_payload - 1]) {
-            last_angle = Get_angle_radian(rx_buffer); 
+        uint8_t crc_calc = Calc_CRC8((uint8_t*)rx_buffer_mbs, expected_payload - 1);
+        if (crc_calc == rx_buffer_mbs[expected_payload - 1]) {
+            last_angle = Get_angle_radian(rx_buffer_mbs);
+            last_RPM = Get_RPM_Raw(rx_buffer_mbs);
         } else {
+            // LED1_TOGGLE
+            digital_io_toggle(LED1_GPIO,LED1_pin);
             // printf("CRC Err! Calc: %02X, Got: %02X\n", crc_calc, rx_buffer[expected_payload - 1]);
         }
     } else {
+        // add led 3 toggle
         // printf("RX Timeout. Got %d bytes.\n", received);
     }
 
     return last_angle;
+}
+
+float Get_RPM(void) {
+    return (float)Get_RPM_Raw(rx_buffer_mbs);
 }

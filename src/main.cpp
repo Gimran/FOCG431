@@ -17,6 +17,8 @@
 // #include "mosrac.h"
 #include "mbs_encoder.h"
 
+// https://aliexpress.ru/item/1005011940269500.html?shpMethod=CAINIAO_STANDARD&sku_id=12000057084077340&spm=a2g2w.productlist.search_results.7.6ae866dbWRL1HV
+
 #define CAN_ID 228
 #define USE_UART_COMMANDER
 // #define USE_CAN_COMMANDER
@@ -68,25 +70,9 @@ LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_OM,
                                                         DRV_PHASE_B_CUR, 
                                                         DRV_PHASE_C_CUR);
 
-#ifdef USE_ENCODER
-float mosSensorCallback(){
-  static float angle = 0.0f;
-  static float prev_angle = 0.0f;
-  static float send_angle = 0.0f;
-  angle = readMySensorCallback();
-  if (abs(angle - prev_angle) > 0.001)
-  {
-    prev_angle = angle;
-    send_angle = angle;
-  }
-  else
-  {
-    send_angle = prev_angle;
-    prev_angle = angle;
-  }
-  return send_angle;
 
-}
+#ifdef USE_ENCODER
+
 
 GenericSensor sensor = GenericSensor(readMySensorCallback);
 #else
@@ -95,7 +81,7 @@ MXLEMMINGObserverSensor observer = MXLEMMINGObserverSensor(motor); // observer s
 
 //
 HardwareSerial Serial1(UART1_RX, UART1_TX);
-HardwareSerial Serial3(UART3_RX, UART3_TX);
+HardwareSerial UART_COM(UART3_RX, UART3_TX);
 SPIClass SPI_3(DRV_MOSI, DRV_MISO, DRV_SCK);
 
 DRV8323_VARS_t gDrv8323 = DRV8323_DEFAULTS;
@@ -120,13 +106,12 @@ void onTarget(char* cmd){
 //! SECTION
 void setup() // SECTION - setup
 {
-	// ENC_Diag_t result = Decode_Encoder_Status(rx_buffer_enc[5]);
 	SimpleFOC_CORDIC_Config(); // initialize the CORDIC
 	GPIO_INIT();
 	// init_DMA_HAL();
 
 	printf_init(UART_COM);
-	UART_COM.begin(115200);		while (!UART_COM);	
+	UART_COM.begin(PC_SPEED);		while (!UART_COM);	
 	// UART_ENC.begin(2500000);	while (!UART_ENC);
 	// UART_ENC.setTimeout(10);
 
@@ -134,17 +119,9 @@ void setup() // SECTION - setup
   pinMode(RS485_DIR_PIN, OUTPUT);
   digitalWrite(RS485_DIR_PIN, LOW);  
 
-
-	
-	//   HAL_UART_Receive_DMA(&UART_ENC, rx_buffer_enc, sizeof(rx_buffer_enc));
-	// RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
-	// RS485_tx(MBS_CMD_GET_POS_TEMP, UART_ENC);
-	// UART_ENC.readBytes(rx_buffer_enc, sizeof(rx_buffer_enc));
-
-	// SPI_3.setSSEL(DRV_CS);
 	SPI_3.begin();
 	UART_COM.println("start");
-	LED1_ON
+
 
   enc_dma_init(UART_ENC);
   printf("enc_init_COMPL\r\n");
@@ -166,7 +143,7 @@ void setup() // SECTION - setup
 	printf("\033[2J\033[H");
 	printf("%s / %s\r\n", __DATE__, __TIME__);
 	printf("COM_init\r\n");
-	LED1_ON
+
 	command.add('M', doMotor, "motor");
 	command.add('R', doRegisters, "change DRV8323 registers");
 	command.add('V', onTarget, "velocity in RPM");
@@ -229,9 +206,9 @@ void setup() // SECTION - setup
 
 	// /*
 
-	motor.controller = MotionControlType::velocity_openloop;
+	// motor.controller = MotionControlType::velocity_openloop;
 	// motor.controller = MotionControlType::angle_openloop;
-  // motor.controller = MotionControlType::velocity;
+  motor.controller = MotionControlType::velocity;
 	motor.torque_controller = TorqueControlType::foc_current;
 	motor.linkCurrentSense(&current_sense);
 	motor.useMonitoring(UART_COM);
@@ -242,7 +219,7 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	motor.velocity_limit = 100;     // rpm
+	// motor.velocity_limit = 100;     // rpm
 
 	motor.monitor_variables = _MON_TARGET | _MON_VOLT_Q | _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
 	motor.monitor_downsample = 100; // default 10
@@ -254,16 +231,27 @@ void setup() // SECTION - setup
 	if (motor_ready_flag)
 	{
 		UART_COM.println("Motor ready.");
+    LED1_TOGGLE
+    _delay(100);
+    LED1_TOGGLE
+    _delay(100);
+    LED1_TOGGLE
+    _delay(100);
+    LED1_TOGGLE
 		LED2_ON
 	}
 
 // motor.velocity_limit = 500;     // rpm
 // motor.PID_velocity.limit = 0.3; // amp
-motor.PID_velocity.P = 0.2;
-motor.PID_velocity.I = 20;
-motor.LPF_velocity.Tf = 0.01;
-motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
+// motor.PID_velocity.P = 0.2;
+// motor.PID_velocity.I = 20;
+// motor.LPF_velocity.Tf = 0.01;
+// motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
 // motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
+motor.LPF_current_d = 0.001f;
+motor.LPF_current_q = 0.001f;
+motor.LPF_velocity.Tf = 0.0f;
+motor.PID_velocity.P = 5.0f;
 #ifdef USE_CAN_COMMANDER
 	commander.echo = true; // Echo received commands back to the sender
 #endif
@@ -288,7 +276,7 @@ void loop() //ANCHOR - LOOP
   #endif
 
   updateVoltage();
-  motor.monitor();
+  // motor.monitor();
 
 }
 
@@ -324,7 +312,7 @@ void checkFault()
   {
     char buffer[33];
     char buffer2[33];
-    Serial3.println(" FAULT INTERRUPT!");
+    printf(" FAULT INTERRUPT!\r\n");
     // digitalWrite(DRV_ENABLE, HIGH);
     _delay(10);
     DRV8323_SPI_Read(&gDrv8323, DRV8323_FAULT_STATUS_1_ADDR);
@@ -478,38 +466,6 @@ void doDriver(char *cmd)
 		// readMySensorCallback();
     float current_angle = readMySensorCallback();
     printf("Current Angle (radians): %.5f\n", current_angle);
-		
-
-	// 		uint8_t mbs_cmd = MBS_CMD_GET_POS_STATUS;
-	// 		// while(UART_ENC.available()) UART_ENC.read();
-    // RS485_tx(mbs_cmd, UART_ENC);
-	// // UART_ENC.flush();
-	// UART_ENC.readBytes(rx_buffer_enc, 7);
-	// // TOFRcv.RAW = rx_buffer_enc;
-	// // strcpy(TOFRcv.RAW, rx_buffer_enc);
-
-	//             for (uint8_t ii=0; ii<8; ii++) {
-    //         printf("%02X ", rx_buffer_enc[ii]);
-    //         }
-    //         printf("\r\n");
-	
-
-	// ENC_Diag_t result = Decode_Encoder_Status(rx_buffer_enc[5]);
-	// //   float get_rad =  readMySensorCallback();
-	// //   printf("rad: %.2f rad / %.2f deg\r\n", get_rad, get_rad * 180.0 / PI);
-	// printf("turns:%d \t count %d \t angle %f \t rad %f \t  shaft %f \t CRC: %02X/%02X status:%02X %s\r\n",
-    //           Get_Multiturn(rx_buffer_enc),
-    //           Get_Singleturn(rx_buffer_enc),
-    //           Get_angle_degree(rx_buffer_enc),
-    //           Get_angle_radian(rx_buffer_enc),
-    //           Get_angle_shaft(Get_angle_degree(rx_buffer_enc),Get_Multiturn(rx_buffer_enc), 47),
-    //         //   Get_Packet_CRC(mbs_cmd,rx_buffer_enc),
-	// 		  rx_buffer_enc[0],
-    //           ML_ENC_CalcCRC(rx_buffer_enc, Get_CRC_position(mbs_cmd)),
-    //           Get_Status_Raw(rx_buffer_enc),
-    //           result.msg
-	// 		      );
-		// memset(rx_buffer_enc, 0, sizeof(rx_buffer_enc));
 	}
 	else if (cmd[1] == '1')
 	{	  
@@ -523,7 +479,7 @@ void doDriver(char *cmd)
 	}
 	else if (cmd[1] == '3')
 	{
-	  printf("template\r\n");
+	  printf("RPM: %.2f\r\n", Get_RPM());
 	}
   }
 
@@ -735,7 +691,8 @@ float getTemperature() {
 
     // Расчет сопротивления термистора для схемы с pulldown
     // R_ntc = R_series * ( (ADC_MAX / ADC_VAL) - 1 )
-    float r_ntc = SERIES_RESISTOR * ((ADC_MAX / ((V_REF / v_out) - 1.0f)));
+    // float r_ntc = SERIES_RESISTOR * ((ADC_MAX / ((V_REF / v_out) - 1.0f)));
+    float r_ntc = SERIES_RESISTOR * ((V_REF / v_out) - 1.0f);
 
     // Расчет по упрощенному уравнению Стейнхарта-Харта (через B-коэффициент)
     float temp = r_ntc / NOMINAL_RESISTANCE; 
@@ -768,111 +725,3 @@ void updateVoltage() {
 		last_voltage = getVoltage();
 	}
 }
-
-// void RS485_tx(uint8_t data, HardwareSerial &Serialll)
-// {
-// 	digitalWrite(RS485_DIR_PIN, HIGH);
-// 	size_t length = sizeof(data);
-// 	Serialll.write(&data, length);
-// 	Serialll.flush(); // Ensure all data is sent before switching back to receive mode
-//   // delayMicroseconds(10); // Short delay to allow the last byte to be transmitted
-// 	digitalWrite(RS485_DIR_PIN, LOW);
-// }
-
-// float readMySensorCallback(void){
-// 	// float angle_rad = 0.0f;
-//   while(UART_ENC.available()) UART_ENC.read();
-//   __HAL_UART_CLEAR_OREFLAG(phuart1);
-//   // UART_ENC.setTimeout(100);
-// 	uint8_t mbs_cmd = MBS_CMD_GET_POS_TEMP;
-// 	while(UART_ENC.available()) UART_ENC.read();
-// 	RS485_tx(mbs_cmd, UART_ENC);
-
-//   uint8_t count = 0;
-//   uint32_t timeout = 100; // Примерный счетчи
-//   USART_TypeDef *base = (USART_TypeDef *)UART_ENC.getHandle()->Instance;
-
-//   while (count < 7 && timeout-- > 0) {
-//     // Проверяем флаг RXNE (регистр данных не пуст)
-//     if (base->ISR & USART_ISR_RXNE) { 
-//       rx_buffer_enc[count++] = base->RDR; // Читаем напрямую из регистра
-//     }
-//   }
-
-// 	  // u_int8_t bytesRead = UART_ENC.readBytes(rx_buffer_enc, 7);
-  
-
-// 	// if(CRC_is_OK(mbs_cmd, rx_buffer_enc))
-// 	// {
-// 	// 	angle_rad = Get_angle_radian(rx_buffer_enc);
-// 	// }
-//   	printf("RAW: ");
-//                 for (uint8_t i = 0; i < 8; i++) {
-//                     printf("%02X ", (uint8_t)rx_buffer_enc[i]);
-//                 } printf("\r\n");
-// 	return Get_angle_radian(rx_buffer_enc);
-// }
-
-// float readMySensorCallback(void) {
-//     static float last_angle_rad = 0.0f; 
-//     static uint32_t debug_counter = 0; 
-//     uint8_t mbs_cmd = MBS_CMD_GET_POS_STATUS;
-
-//     // 1. Очистка буфера и сброс ошибки
-//     __HAL_UART_CLEAR_OREFLAG(phuart1);
-//     volatile uint8_t dummy = phuart1->Instance->RDR; 
-
-//     // 2. Отправка команды
-//     digitalWrite(RS485_DIR_PIN, HIGH);
-//     HAL_UART_Transmit(phuart1, &mbs_cmd, 1, 2); 
-//     digitalWrite(RS485_DIR_PIN, LOW);
-
-//     // 3. Запуск DMA приема
-//     if (HAL_UART_Receive_DMA(phuart1, rx_buffer_enc, 7) == HAL_OK) {
-        
-//         // 4. Ожидание пакета
-//         uint32_t start_time = micros();
-//         while (phuart1->RxState != HAL_UART_STATE_READY) {
-//             if ((micros() - start_time) > 200) { 
-//                 HAL_UART_DMAStop(phuart1);       
-//                 break;
-//             }
-//         }
-
-//         // 5. Проверка и вывод
-//         if (phuart1->RxState == HAL_UART_STATE_READY) {
-            
-
-                
-                
-//                 if (CRC_is_OK(mbs_cmd, rx_buffer_enc)) {
-//                     printf(" | CRC: OK\r\n");
-//                 } else {
-//                     printf(" | CRC: ERROR\r\n");
-//                 }
-                
-//                 // debug_counter = 0;
-            
-
-//             if (CRC_is_OK(mbs_cmd, rx_buffer_enc)) {
-//                 last_angle_rad = Get_angle_radian(rx_buffer_enc);
-//             }
-//         }
-//     }
-// 	printf("RAW: ");
-//                 for (uint8_t i = 0; i < 8; i++) {
-//                     printf("%02X ", rx_buffer_enc[i]);
-//                 } printf("\r\n");
-
-//     return last_angle_rad;
-// }
-
-// void Reset_pos_sensor(){
-// 	for (uint8_t i = 0; i < 5; i++)
-// 	{
-// 	RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
-// 	delayMicroseconds(50);
-// 	RS485_tx(MBS_CMD_GET_POS, UART_ENC);
-// 	delayMicroseconds(50);
-// 	}
-// }

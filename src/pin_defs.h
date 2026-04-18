@@ -28,6 +28,16 @@
 #define LED2 PB1
 #define LED3 PB2
 #define LED4 PC13
+#define LED1_GPIO GPIOB
+#define LED2_GPIO GPIOB
+#define LED3_GPIO GPIOB
+#define LED4_GPIO GPIOC
+#define LED1_pin LL_GPIO_PIN_0
+#define LED2_pin LL_GPIO_PIN_1
+#define LED3_pin LL_GPIO_PIN_2
+#define LED4_pin LL_GPIO_PIN_13
+
+
 #endif
 
 

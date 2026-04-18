@@ -13,7 +13,7 @@ extern "C" {
 #define UART_ENC Serial1
 
 #define ENC_SPEED 2500000
-#define PC_SPEED 115200
+#define PC_SPEED 256000
 
 //TODO - move to gpio lib
 #if defined(PCB_3200)
@@ -28,6 +28,7 @@ extern "C" {
 #elif defined(PCB_5410)
 #define LED1_ON  digitalWrite(LED1, LOW);
 #define LED1_OFF digitalWrite(LED1, HIGH);
+#define LED1_TOGGLE digital_io_toggle(LED1_GPIO,LED1_pin);
 #define LED2_ON  digitalWrite(LED2, LOW);
 #define LED2_OFF digitalWrite(LED2, HIGH);
 #define LED3_ON  digitalWrite(LED3, LOW);
