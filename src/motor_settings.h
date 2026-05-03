@@ -48,7 +48,7 @@ extern "C" {
 
 #define MAX_CURRENT       5.0f
 #define OPERATION_VOLTAGE 42.0f
-#define PWM_FREQ          10000
+#define PWM_FREQ          30000
 #endif
 
 

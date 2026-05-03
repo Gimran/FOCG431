@@ -12,11 +12,11 @@
 #include <drv8323rs.h>
 #include <LibPrintf.h>
 #include "motor_settings.h"
-// #include "pin_defs.h"
+#include "pin_defs.h"
 #include "current_sense/hardware_specific/stm32/stm32_mcu.h"
-// #include "mosrac.h"
 #include "mbs_encoder.h"
 #include "pids.h"
+#include <drv_utils.h>
 
 // https://aliexpress.ru/item/1005011940269500.html?shpMethod=CAINIAO_STANDARD&sku_id=12000057084077340&spm=a2g2w.productlist.search_results.7.6ae866dbWRL1HV
 
@@ -24,12 +24,11 @@
 #define USE_UART_COMMANDER
 // #define USE_CAN_COMMANDER
 
-void printDrv8323Regs();
+// void printDrv8323Regs(gDrv8323);
 uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data);
 void DRV8323_SPI_Read(DRV8323_VARS_t *v, uint16_t address);
 void DRV8323_SPI_Write(DRV8323_VARS_t *v, uint16_t address);
 void checkFault();
-void rampACC(float target_speed, float acceleration_rate);
 void doRegisters(char *cmd);
 void doDriver(char *cmd);
 void GPIO_INIT();
@@ -40,6 +39,7 @@ void DRV_enable_ISR();
 float getTemperature();
 float getVoltage();
 void updateVoltageTemp();
+void switch_target (void);
 // void RS485_tx(uint8_t data, HardwareSerial &Serial);
 // float readMySensorCallback(void);
 // void Reset_pos_sensor();
@@ -170,30 +170,12 @@ void setup() // SECTION - setup
 	driverBase.enable();
 	_delay(50);
 	setup_DRV_registers(0);
-	_delay(100);
-
-	// driverBase.disable();
-	_delay(50);
 	driverBase.init();
-	// digitalWrite(DRV_ENABLE, HIGH);
 	_delay(50);
 	drvReadAllRegs();
-	printDrv8323Regs();
-	// checkFault();
-
+	printDrv8323Regs(gDrv8323);
 	current_sense.linkDriver(&driverBase);
 	current_sense.init();
-
-	// power supply voltage [V]
-
-	// driverBase.dead_zone = 0.05f; // 5% dead time for both high and low side
-
-	//   motor.voltage_sensor_align = 2.0;
-
-	// digitalWrite(DRV_ENABLE, HIGH);
-	// digitalWrite(DRV_PHASE_A_L, LOW);
-	// digitalWrite(DRV_PHASE_C_L, HIGH);
-
 	PhaseCurrent_s currents = current_sense.getPhaseCurrents();
 	printf("Currents: Ia=%.3f A, Ib=%.3f A, Ic=%.3f A\r\n",
 		   currents.a, currents.b, currents.c);
@@ -204,8 +186,6 @@ void setup() // SECTION - setup
   #else
 	motor.linkSensor(&observer);
   #endif
-
-
 	motor.linkCurrentSense(&current_sense);
 	motor.useMonitoring(UART_COM);
 
@@ -215,20 +195,17 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	motor.velocity_limit = 1000;
-
+	motor.velocity_limit = 1000;     // rpm
 	motor.monitor_variables = _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-	motor.monitor_downsample = 100; // default 10
-  
-int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
-// int32_t downsample_cnt = 0;
+	motor.monitor_downsample = 1000; // default 10
 	motor.current_limit = MAX_CURRENT; // amp
   motor.controller = MotionControlType::velocity;
 	motor.torque_controller = TorqueControlType::foc_current;
   setup_PIDs(&motor);
+
 	motor.init();
   float bandwidth = 150.0f; // Hz
-
+  // int res = motor.tuneCurrentController(bandwidth);
 	int motor_ready_flag = motor.initFOC();
 	if (motor_ready_flag)
 	{
@@ -242,9 +219,6 @@ int32_t downsample = 100;    // depending on your MCU's speed, you might want a 
     LED1_TOGGLE
 		LED2_ON
 	}
-
-
-
 #ifdef USE_CAN_COMMANDER
 	commander.echo = true; // Echo received commands back to the sender
 #endif
@@ -269,32 +243,8 @@ void loop() //ANCHOR - LOOP
   updateVoltageTemp();
   // motor.monitor();
 
-}
+  switch_target();
 
-void rampACC(float target_speed, float acceleration_rate)
-{
-  static float current_target = 0.0;      // Переменная для хранения текущего шага
-  static long last_timestamp = _micros(); // Таймер
-  // Рассчитываем время, прошедшее с прошлого прохода
-  long now = _micros();
-  float dt = (now - last_timestamp) * 1e-6f; // Переводим микросекунды в секунды
-  last_timestamp = now;
-
-  // Увеличиваем текущую цель плавно во времени
-  if (current_target < target_speed)
-  {
-    current_target += acceleration_rate * dt;
-    if (current_target > target_speed)
-      current_target = target_speed;
-  }
-  else if (current_target > target_speed)
-  {
-    current_target -= acceleration_rate * dt;
-    if (current_target < target_speed)
-      current_target = target_speed;
-  }
-
-  motor.target = current_target;
 }
 
 void checkFault()
@@ -370,31 +320,7 @@ void DRV8323_SPI_Write(DRV8323_VARS_t *v, uint16_t address)
   SPI_Driver(v, w.all);
   digitalWrite(DRV_CS, HIGH);
 }
-void printDrv8323Regs()
-{
-  Serial3.println("--- DRV8323 gDrv8323 Registers ---");
-  Serial3.print("Fault_Status_1: 0x");
-  Serial3.println(gDrv8323.Fault_Status_1.all, HEX);
-  Serial3.print("VGS_Status_2: 0x");
-  Serial3.println(gDrv8323.VGS_Status_2.all, HEX);
-  Serial3.print("Driver_Control: 0x");
-  Serial3.println(gDrv8323.Driver_Control.all, HEX);
-  Serial3.print("Gate_Drive_HS: 0x");
-  Serial3.println(gDrv8323.Gate_Drive_HS.all, HEX);
-  Serial3.print("Gate_Drive_LS: 0x");
-  Serial3.println(gDrv8323.Gate_Drive_LS.all, HEX);
-  Serial3.print("OCP_Control: 0x");
-  Serial3.println(gDrv8323.OCP_Control.all, HEX);
-  Serial3.print("CSA_Control: 0x");
-  Serial3.println(gDrv8323.CSA_Control.all, HEX);
-  Serial3.print("fault: 0x");
-  Serial3.println(gDrv8323.fault, HEX);
-  Serial3.print("ScsPort: 0x");
-  Serial3.println(gDrv8323.ScsPort, HEX);
-  Serial3.print("ScsPin: 0x");
-  Serial3.println(gDrv8323.ScsPin, HEX);
-  Serial3.println("----------------------------------");
-}
+
 
 void doDriver(char *cmd)
 {
@@ -404,25 +330,22 @@ void doDriver(char *cmd)
     {
       printf("Enabling driver\r\n");
       DRV_ENABLE_ON
-      // driverBase.enable();
+
     }
     else if (cmd[1] == '0')
     {
       printf("Disabling driver\r\n");
       DRV_ENABLE_OFF
-      // driverBase.disable();
     }
   }
   else if (cmd[0] == 'R')
   {
     if (cmd[1] == '1')
     {
-      // driverBase.enable();
       drvReadAllRegs();
       gDrv8323.Driver_Control.bit.CLR_FLT = drv_clrFaults;
       DRV8323_SPI_Write(&gDrv8323, DRV8323_DRIVER_CNTRL_ADDR);
       printf("Cleared faults: FAULT_PIN:%d\r\n", digitalRead(DRV_NFAULT));
-      // driverBase.disable();
     }
   }
     else if (cmd[0] == 'I')
@@ -451,18 +374,15 @@ void doDriver(char *cmd)
   {
 	if (cmd[1] == '0')
 	{
-		// readMySensorCallback();
     float current_angle = readMySensorCallback();
     printf("Current Angle (radians): %.5f\n", current_angle);
 	}
 	else if (cmd[1] == '1')
-	{	  
-		// RS485_tx(MBS_CMD_SET_ZERO, UART_ENC);
+	{	  ;
 	  printf("Reset angle\r\n");
 	}
 	else if (cmd[1] == '2')
 	{	  
-		// Reset_pos_sensor();
 		printf("Reset angle\r\n");
 	}
 	else if (cmd[1] == '3')
@@ -484,7 +404,7 @@ void doRegisters(char *cmd)
     {
       DRV_ENABLE_ON
       drvReadAllRegs();
-      printDrv8323Regs();
+      // printDrv8323Regs();
     }
 
     else if (cmd[1] != 'A')
@@ -548,6 +468,13 @@ void GPIO_INIT()
   pinMode(LED2, OUTPUT);  digitalWrite(LED2, HIGH);
   pinMode(LED3, OUTPUT);  digitalWrite(LED3, HIGH);
   pinMode(LED4, OUTPUT);  digitalWrite(LED4, HIGH);
+
+  pinMode(PA4, INPUT_PULLDOWN); 
+  pinMode(PA6, INPUT_PULLDOWN);
+
+  pinMode(PA5, OUTPUT);
+  digitalWrite(PA5, HIGH);
+
   #endif
 
 
@@ -724,4 +651,21 @@ void updateVoltageTemp() {
       printf("Critical motor temperature reached: %.2f *C. Driver disabled.\r\n", temp);
     }    
 	}
+}
+
+
+void switch_target (void)
+{
+  bool state_pa4 = digitalRead(PA4);
+    bool state_pa6 = digitalRead(PA6);
+
+    if (state_pa4 && !state_pa6) {
+        motor.target = 100.0f;  // Вперед
+    } 
+    else if (!state_pa4 && state_pa6) {
+        motor.target = -100.0f; // Назад
+    } 
+    else {
+        motor.target = 0.0f;    // Стоп (если оба 0 или оба 1)
+    }
 }
