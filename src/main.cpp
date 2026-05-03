@@ -40,12 +40,6 @@ float getTemperature();
 float getVoltage();
 void updateVoltageTemp();
 void switch_target (void);
-// void RS485_tx(uint8_t data, HardwareSerial &Serial);
-// float readMySensorCallback(void);
-// void Reset_pos_sensor();
-
-// UART_HandleTypeDef *phuart1; // Указатель на хэндл
-// DMA_HandleTypeDef hdma_usart1_rx;
 
 /**
      BLDCMotor class constructor

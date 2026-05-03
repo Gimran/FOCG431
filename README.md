@@ -1,56 +1,37 @@
-# FOCG431
-siplefoc g431 driver
+## Управление через терминал (Commander)
 
-## Custom Commands
+В проекте реализованы кастомные команды для взаимодействия с мотором, телеметрией и регистрами драйвера DRV8323. 
 
-The firmware provides several custom commands via the serial interface for controlling and configuring the motor and driver.
+### Базовое движение
+* **`M<команда>`** — Стандартные команды SimpleFOC для объекта `motor`[cite: 2].
+* **`V<число>`** — Задание целевой скорости напрямую в об/мин (RPM). Прошивка автоматически конвертирует значение в рад/с[cite: 2].
 
-### `M` - Motor Commands
+### Управление драйвером и телеметрия (`D`)
+* **`DE1` / `DE0`** — Включить / Выключить драйвер (аппаратное управление пином `DRV_ENABLE`)[cite: 2].
+* **`DR1`** — Сброс ошибок драйвера DRV8323 (Clear Faults). Автоматически считывает регистры и отправляет команду сброса[cite: 2].
+* **`DI1`** — Принудительная повторная инициализация FOC (`motor.initFOC()`)[cite: 2].
+* **`DTM`** — Вывод расчетной температуры мотора в °C (с АЦП термистора)[cite: 2].
+* **`DTV`** — Вывод текущего напряжения питания силовой шины в Вольтах[cite: 2].
+* **`DA0`** — Вывод текущего угла в радианах[cite: 2].
+* **`DA3`** — Вывод текущей скорости мотора в RPM[cite: 2].
 
-This command provides access to the standard SimpleFOC motor commands. It acts as a gateway to configure motor parameters like PID values, limits, and motion control settings.
+### Работа с регистрами DRV8323 (`R`, `1`, `2`)
+* **`RA`** — Чтение всех конфигурационных регистров драйвера[cite: 2].
+* **`R<адрес>`** — Чтение конкретного регистра по его адресу (от 0 до 9) с выводом шестнадцатеричного значения[cite: 2].
+* **`1`** — Изменить Gain (усиление токовых шунтов) DRV8323 на **40**[cite: 2].
+* **`2`** — Изменить Gain (усиление токовых шунтов) DRV8323 на **20**[cite: 2].
 
-**Usage:** `M<command><value>`
+---
 
-**Example:**
-*   `MTP10` - Set the target velocity to 10 rad/s.
-*   `MP1.2` - Set the P-gain of the velocity PID controller to 1.2.
+## Аппаратное переключение скорости (`switch_target`)
 
-Refer to the SimpleFOC documentation for a complete list of available motor commands.
+Функция `switch_target()` обеспечивает хардверное управление вращением без использования терминала. Она циклично опрашивает два входа и жестко задает `motor.target`[cite: 2]. 
 
-### `V` - Set Velocity
+Пины `PA4` и `PA6` сконфигурированы как `INPUT_PULLDOWN`. Срабатывание происходит по приходу высокого логического уровня[cite: 2].
 
-Sets the target velocity for the motor in Revolutions Per Minute (RPM).
-
-**Usage:** `V<rpm>`
-
-**Example:**
-*   `V300` - Sets the target velocity to 300 RPM.
-*   `V-100` - Sets the target velocity to -100 RPM (counter-clockwise).
-
-### `R` - DRV8323 Registers
-
-This command is used to interact with the registers of the DRV8323 motor driver.
-
-**Usage:**
-*   `RA` - Read all registers from the DRV8323 and print their values.
-*   `R<addr>` - Read a specific register at the given address (0-6).
-*   `1` - Set the current sense amplifier gain to 40 V/V.
-*   `2` - Set the current sense amplifier gain to 20 V/V.
-
-**Examples:**
-*   `RA` - Dumps all register values.
-*   `R0` - Reads the "Fault Status 1" register.
-*   `R6` - Reads the "CSA Control" register.
-
-### `D` - Driver Control
-
-This command controls the DRV8323 driver settings.
-
-**Usage:**
-*   `DE1` - Enable the motor driver.
-*   `DE0` - Disable the motor driver.
-*   `DR1` - Clear any existing fault flags on the driver.
-
-**Examples:**
-*   `DE1` - Turns on the gate driver.
-*   `DR1` - Resets fault status.
+| Пин PA4 | Пин PA6 | Состояние мотора | Значение `motor.target` |
+|:---:|:---:|:---|:---|
+| **1** | 0 | Вращение вперед | 100.0 |
+| 0 | **1** | Вращение назад | -100.0 |
+| 0 | 0 | Остановка (нет сигнала) | 0.0 |
+| 1 | 1 | Остановка (коллизия) | 0.0 |
