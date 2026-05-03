@@ -16,6 +16,7 @@
 #include "current_sense/hardware_specific/stm32/stm32_mcu.h"
 // #include "mosrac.h"
 #include "mbs_encoder.h"
+#include "pids.h"
 
 // https://aliexpress.ru/item/1005011940269500.html?shpMethod=CAINIAO_STANDARD&sku_id=12000057084077340&spm=a2g2w.productlist.search_results.7.6ae866dbWRL1HV
 
@@ -214,46 +215,19 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	motor.velocity_limit = 1000;     // rpm
+	motor.velocity_limit = 1000;
 
 	motor.monitor_variables = _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-	motor.monitor_downsample = 1000; // default 10
-
+	motor.monitor_downsample = 100; // default 10
+  
+int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
+// int32_t downsample_cnt = 0;
 	motor.current_limit = MAX_CURRENT; // amp
-    motor.controller = MotionControlType::velocity;
+  motor.controller = MotionControlType::velocity;
 	motor.torque_controller = TorqueControlType::foc_current;
-motor.LPF_current_d = 0.0f;
-motor.LPF_current_q = 0.0f;
-motor.LPF_velocity.Tf = 0.0f;
-motor.PID_velocity.P = 5.0f;
-motor.PID_current_q.P = 0.04f;
-motor.PID_current_q.I = 500.0f;
-// current q loop PID 
-motor.PID_current_q.P = 0.4;
-motor.PID_current_q.I = 0.2;
-motor.PID_current_q.D = 0.0;
-motor.PID_current_q.output_ramp = 0.0;
-motor.PID_current_q.limit = 12.0;
-// Low pass filtering time constant 
-motor.LPF_current_q.Tf = 0.0;
-// current d loop PID
-motor.PID_current_d.P = 0.4;
-motor.PID_current_d.I = 0.2;
-motor.PID_current_d.D = 0.0;
-motor.PID_current_d.output_ramp = 0.0;
-motor.PID_current_d.limit = 12.0;
-
-// motor.velocity_limit = 500;     // rpm
-// motor.PID_velocity.limit = 0.3; // amp
-// motor.PID_velocity.P = 0.2;
-// motor.PID_velocity.I = 20;
-// motor.LPF_velocity.Tf = 0.01;
-// motor.PID_velocity.output_ramp = 10; //!< Maximum speed of change of the output value
-// motor.LPF_velocity.Tf = 0.05;  //!< Low pass filter time constant
-
+  setup_PIDs(&motor);
 	motor.init();
   float bandwidth = 150.0f; // Hz
-  // int res = motor.tuneCurrentController(bandwidth);
 
 	int motor_ready_flag = motor.initFOC();
 	if (motor_ready_flag)
@@ -280,8 +254,6 @@ motor.PID_current_d.limit = 12.0;
 
 } //! SECTION
 
-// int32_t downsample = 100;    // depending on your MCU's speed, you might want a value between 5 and 50...
-// int32_t downsample_cnt = 0;
 
 void loop() //ANCHOR - LOOP
 {

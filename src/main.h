@@ -9,6 +9,7 @@ extern "C" {
 #include "pin_defs.h"
 #include <stdint.h>
 
+
 #define UART_COM Serial3
 #define UART_ENC Serial1
 
@@ -39,6 +40,8 @@ extern "C" {
 
 #define DRV_ENABLE_ON  digitalWrite(DRV_ENABLE, HIGH);
 #define DRV_ENABLE_OFF digitalWrite(DRV_ENABLE, LOW);
+
+
 
 
 #ifdef __cplusplus
