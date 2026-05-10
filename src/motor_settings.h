@@ -46,9 +46,10 @@ extern "C" {
 #define SHUNT_OM 0.005f
 #define GAIN 40
 
-#define MAX_CURRENT       5.0f
-#define OPERATION_VOLTAGE 42.0f
-#define PWM_FREQ          30000
+#define MAX_CURRENT       	2.0f
+#define SUPPLY_VOLTAGE    	24.0f
+#define MOTOR_VOLTAGE_LIMIT 48.0f
+#define PWM_FREQ          	30000
 #endif
 
 

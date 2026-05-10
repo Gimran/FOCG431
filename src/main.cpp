@@ -189,9 +189,9 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	motor.velocity_limit = 1000;     // rpm
-	motor.monitor_variables = _MON_CURR_Q | _MON_VEL | _MON_ANGLE;
-	motor.monitor_downsample = 1000; // default 10
+	motor.velocity_limit = 200;     // rad/s
+	motor.monitor_variables = _MON_TARGET | _MON_VEL | _MON_ANGLE;
+	motor.monitor_downsample = 200; // default 10
 	motor.current_limit = MAX_CURRENT; // amp
   motor.controller = MotionControlType::velocity;
 	motor.torque_controller = TorqueControlType::foc_current;
@@ -235,9 +235,11 @@ void loop() //ANCHOR - LOOP
   #endif
 
   updateVoltageTemp();
-  // motor.monitor();
-
+  motor.monitor();
+  #ifdef KEYCONTROL
   switch_target();
+  #endif
+
 
 }
 
@@ -636,6 +638,9 @@ void updateVoltageTemp() {
 		if (fabs(last_voltage - now_voltage) > 2.0f) {
 			printf("Voltage changed: %.2f V\r\n", now_voltage);
 			driverBase.voltage_power_supply = now_voltage;
+      // driverBase.voltage_limit = now_voltage;
+      // motor.voltage_limit = now_voltage;
+      // motor.updateVoltageLimit(now_voltage);
 		}
 		last_voltage = now_voltage;
     float temp = getTemperature();

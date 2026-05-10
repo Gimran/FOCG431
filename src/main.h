@@ -9,7 +9,7 @@ extern "C" {
 #include "pin_defs.h"
 #include <stdint.h>
 
-
+// #define KEYCONTROL 1
 #define UART_COM Serial3
 #define UART_ENC Serial1
 

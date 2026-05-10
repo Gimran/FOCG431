@@ -6,7 +6,14 @@
 
 static inline void setup_PIDs(FOCMotor *motor)
 {
-
+	motor -> voltage_limit = MOTOR_VOLTAGE_LIMIT;
+	// angle loop PID
+	motor -> P_angle.P = 5.0f;
+	motor -> P_angle.I = 0.0f;
+	motor -> P_angle.D = 0.0f;
+	motor -> P_angle.output_ramp = 0.0f;
+	motor -> LPF_angle.Tf = 0.0f;
+	// velocity loop PID
 	motor -> PID_velocity.P = 0.5f;
 	motor -> PID_velocity.I = 5.0f;
 	motor -> PID_velocity.output_ramp = 0.0f;
