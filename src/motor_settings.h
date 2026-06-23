@@ -6,10 +6,10 @@ extern "C" {
 
 #define CRITICAL_MOTOR_TEMP 70.0f
 
-// #define BLDC_2804
+#define BLDC_2804
 // #define BLDC_MOSRAC_U3822
-#define BLDC_MOSRAC_U6017
-#define USE_ENCODER
+// #define BLDC_MOSRAC_U6017
+// #define USE_ENCODER
 
 #ifdef BLDC_2804
 #define POLE_PAIRS        7
@@ -18,11 +18,13 @@ extern "C" {
 #define L_Q               0.00086f
 
 #define SHUNT_OM          0.005f
-#define GAIN              10
+#define GAIN              40
 
-#define MAX_CURRENT       0.3f
+#define MAX_CURRENT       0.2f
 #define OPERATION_VOLTAGE 12.0f
-#define PWM_FREQ          20000
+#define PWM_FREQ          30000
+#define MOTOR_VOLTAGE_LIMIT 12.0f
+#define GEAR_RATIO        50.0f
 
 #elifdef BLDC_MOSRAC_U3822
 
@@ -36,6 +38,7 @@ extern "C" {
 #define MAX_CURRENT       2.0f
 #define OPERATION_VOLTAGE 27.0f
 #define PWM_FREQ          20000
+#define GEAR_RATIO        50.0f
 
 #elifdef BLDC_MOSRAC_U6017
 
@@ -47,9 +50,10 @@ extern "C" {
 #define GAIN 40
 
 #define MAX_CURRENT       	2.0f
-#define SUPPLY_VOLTAGE    	24.0f
-#define MOTOR_VOLTAGE_LIMIT 48.0f
+#define SUPPLY_VOLTAGE    	36.0f
+#define MOTOR_VOLTAGE_LIMIT 36.0f
 #define PWM_FREQ          	30000
+#define GEAR_RATIO        50.0f
 #endif
 
 

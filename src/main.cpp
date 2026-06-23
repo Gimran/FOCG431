@@ -17,12 +17,14 @@
 #include "mbs_encoder.h"
 #include "pids.h"
 #include <drv_utils.h>
+#include "servo_can_bridge.h"
+#include <EEPROM.h>
 
 // https://aliexpress.ru/item/1005011940269500.html?shpMethod=CAINIAO_STANDARD&sku_id=12000057084077340&spm=a2g2w.productlist.search_results.7.6ae866dbWRL1HV
 
-#define CAN_ID 228
-#define USE_UART_COMMANDER
-// #define USE_CAN_COMMANDER
+#define CAN_ID 1
+// #define USE_UART_COMMANDER
+#define USE_CAN_COMMANDER
 
 // void printDrv8323Regs(gDrv8323);
 uint16_t SPI_Driver(DRV8323_VARS_t *v, uint16_t data);
@@ -147,6 +149,9 @@ void setup() // SECTION - setup
 	printf("CAN_init\r\n");
 	commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
 	commander.init();
+
+  initServoCANBridge(commander);
+
 	printf("CAN_init_COMPL\r\n");
 	commander.addMotor(&motor);
 	printf("CAN_addmotor_COMPL\r\n");
@@ -189,11 +194,11 @@ void setup() // SECTION - setup
 	motor.zero_electric_angle = 0;
   // motor.skip_align = true;
   #endif
-	motor.velocity_limit = 200;     // rad/s
-	motor.monitor_variables = _MON_TARGET | _MON_VEL | _MON_ANGLE;
+	motor.velocity_limit = 33;     // rad/s
+	// motor.monitor_variables = _MON_TARGET | _MON_VEL | _MON_ANGLE;
 	motor.monitor_downsample = 200; // default 10
 	motor.current_limit = MAX_CURRENT; // amp
-  motor.controller = MotionControlType::velocity;
+  motor.controller = MotionControlType::angle_openloop;
 	motor.torque_controller = TorqueControlType::foc_current;
   setup_PIDs(&motor);
 
@@ -214,7 +219,7 @@ void setup() // SECTION - setup
 		LED2_ON
 	}
 #ifdef USE_CAN_COMMANDER
-	commander.echo = true; // Echo received commands back to the sender
+	// commander.echo = true; // Echo received commands back to the sender
 #endif
 
 	// _delay(100);
@@ -235,9 +240,9 @@ void loop() //ANCHOR - LOOP
   #endif
 
   updateVoltageTemp();
-  motor.monitor();
+  // motor.monitor();
   #ifdef KEYCONTROL
-  switch_target();
+  // switch_target();
   #endif
 
 
