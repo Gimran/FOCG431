@@ -11,14 +11,31 @@
 #define MBS_CMD_GET_POS_TEMP       0x74
 
 typedef struct mbs_data {
-    float angle;
-    float rpm;
-    uint8_t status;
+    float angle;    // угол (рад), singleturn
+    float rpm;      // датчик отдаёт обороты/сек * 10, храним value/10
+    float temp;     // температура кристалла энкодера (°C)
+    uint8_t status; // статус-байт (см. ENC_Status_t)
 } mbs_data_t;
 
+// Кэш последних успешно принятых данных энкодера
+extern mbs_data_t mbs_data;
+
+// Результат последней RS485-транзакции (для диагностики линка)
+enum MBS_LinkErr : uint8_t {
+    MBS_ERR_NONE    = 0, // ответ принят, CRC сошёлся
+    MBS_ERR_TIMEOUT = 1, // энкодер не ответил (питание/провода A-B/скорость)
+    MBS_ERR_CRC     = 2, // ответ принят, но CRC не сошёлся (помехи/скорость)
+};
+extern volatile uint8_t mbs_link_err;
+
 void enc_dma_init(HardwareSerial &Serial_enc);
-float readMySensorCallback();
-float Get_RPM(void);
+
+// Каждый вызов делает свежий запрос по RS485 (0x73/0x74/0x64),
+// при ошибке CRC/таймауте возвращает последнее валидное значение из кэша.
+float readMySensorCallback();          // 0x73: угол (рад), попутно обновляет rpm
+float Get_RPM(void);                   // 0x73: скорость, попутно обновляет угол
+float MBS_GetTemperature(void);        // 0x74: температура (°C), попутно обновляет угол
+uint8_t MBS_GetStatus(void);           // 0x64: статус-байт, попутно обновляет угол
 
 
 typedef struct __attribute__((packed)) {

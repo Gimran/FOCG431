@@ -23,6 +23,99 @@
 
 ---
 
+## Кастомные CAN-регистры (0xE0–0xEC)
+
+Регистры реализованы в `src/servo_can_bridge.cpp` поверх SimpleFOC CANCommander. Все float-регистры — 4 байта, little-endian; uint8 — 1 байт. Запись в read-only регистры отклоняется прошивкой.
+
+| Адрес | Имя | Доступ | Тип | Описание |
+|:---:|---|:---:|:---:|---|
+| 0xE0 | `REG_GEAR_RATIO` | R/W | float | Передаточное число редуктора. Запись сохраняется в EEPROM (адрес 0) |
+| 0xE1 | `REG_SERVO_TARGET` | R/W | float | Целевой угол выходного вала, рад. Чтение возвращает `target / gear_ratio` |
+| 0xE2 | `REG_SERVO_ANGLE` | R | float | Текущий угол выходного вала, рад (`shaft_angle / gear_ratio`) |
+| 0xE3 | `REG_SERVO_VEL` | R | float | Текущая скорость выходного вала, рад/с |
+| 0xE4 | `REG_VOLTAGE` | R | float | Напряжение питания платы, В (АЦП через делитель) |
+| 0xE5 | `REG_TEMPERATURE` | R | float | Температура мотора, °C (NTC-термистор) |
+| 0xE6 | `REG_CANID` | R/W | uint8 | CANID узла (1–254). Сохраняется в EEPROM (адрес 4), **применяется после перезагрузки**. Чтение возвращает текущий активный ID |
+| 0xE7 | `REG_REBOOT` | W | uint8 | Запись `1` — штатное отключение мотора (`motor.disable()`) и сброс MCU. Другие значения отклоняются. Ответ по CAN не приходит |
+| 0xE8 | `REG_ENC_ANGLE` | R | float | Угол с энкодера MBS (singleturn), рад. Свежий запрос 0x73 по RS485 |
+| 0xE9 | `REG_ENC_RPM` | R | float | Скорость с энкодера MBS, об/с. Свежий запрос 0x73 |
+| 0xEA | `REG_ENC_TEMP` | R | float | Температура кристалла энкодера, °C. Свежий запрос 0x74 |
+| 0xEB | `REG_ENC_STATUS` | R | uint8 | Статус-байт энкодера. Свежий запрос 0x64 |
+| 0xEC | `REG_BOOTLOADER` | R/W | uint8 | Чтение: `1` — бутлоадер Katapult обнаружен во flash, `0` — нет. Запись `1` — отключение мотора и переход в Katapult для прошивки по CAN. Другие значения отклоняются. Ответ по CAN не приходит |
+
+Чтение 0xE8–0xEB блокирует loop на время транзакции RS485 (обычно <1 мс, максимум 2 мс по таймауту).
+
+### Биты статуса энкодера (`REG_ENC_STATUS`, 0xEB)
+
+| Бит | Значение |
+|:---:|---|
+| b0 | Over speed |
+| b1 | Температура вне диапазона |
+| b2 | Слабое магнитное поле |
+| b3 | Сильное магнитное поле |
+| b4 | Низкий заряд батареи (<2.9 В — warning, <2.7 В — error) |
+| b5 | Потеря батареи (multiturn недостоверен и сброшен) |
+| b6 | Warning (данные ещё валидны) |
+| b7 | Error (данные невалидны) |
+
+---
+
+## Прошивка по CAN (Katapult)
+
+Используется бутлоадер [Katapult](https://github.com/Arksine/katapult). Он занимает первые 8 КиБ flash (0x08000000–0x08002000), приложение собирается со смещением и стартует с 0x08002000.
+
+### Однократная установка бутлоадера (через ST-Link)
+
+Сборка Katapult на Linux/WSL:
+
+```bash
+git clone https://github.com/Arksine/katapult
+cd katapult
+make menuconfig
+make
+```
+
+Параметры menuconfig:
+
+| Параметр | Значение |
+|---|---|
+| Micro-controller Architecture | STMicroelectronics STM32 |
+| Processor model | STM32G431 |
+| Clock Reference | 16 MHz crystal |
+| Communication interface | CAN bus (on PA11/PA12) |
+| Application start offset | 8KiB offset |
+| CAN bus speed | 1000000 |
+
+Прошить `out/katapult.bin` по адресу `0x08000000` (ST-Link/OpenOCD/STM32CubeProgrammer).
+
+### Сборка и прошивка приложения
+
+Окружение `genericSTM32G431CB_katapult` в `platformio.ini` собирает прошивку со смещением 8 КиБ. Прошить её можно как ST-Link'ом (бутлоадер не затирается), так и по CAN:
+
+Прошивка реализует admin-протокол Katapult/Klipper (стандартный CAN ID 0x3f0, класс `ServoCANCommander`), поэтому **штатный `flashtool.py` работает без дополнительных действий**:
+
+```bash
+# найти устройства на шине; работающая прошивка отвечает UUID'ом ("Application: Klipper")
+python3 katapult/scripts/flashtool.py -i can0 -q
+
+# прошить одной командой: flashtool сам переведёт устройство в бутлоадер
+python3 katapult/scripts/flashtool.py -i can0 -u <uuid> -f .pio/build/genericSTM32G431CB_katapult/firmware.bin
+
+# либо только перевести в бутлоадер без прошивки
+python3 katapult/scripts/flashtool.py -i can0 -u <uuid> -r
+```
+
+UUID вычисляется из уникального ID чипа тем же алгоритмом, что и в Katapult (fasthash64), поэтому совпадает с UUID бутлоадера; он также печатается в UART при старте (`Katapult UUID: ...`).
+
+Резервные пути входа в бутлоадер: запись `1` в регистр `0xEC` (`REG_BOOTLOADER`), двойное нажатие reset (double reset), автоматический вход при отсутствии валидного приложения.
+
+Примечания:
+- `flashtool.py` работает через socketcan (Linux). На Windows — WSL2 + usbipd для USB-CAN адаптера (candlelight/gs_usb) либо любой Linux-хост на шине.
+- Адресация Katapult (UUID из chip id) не пересекается с CANID SimpleFOC-регистров.
+- Обычное окружение `genericSTM32G431CB` (без смещения) прошивается с 0x08000000 и затирает бутлоадер — для работы с Katapult использовать только `_katapult`-окружение.
+
+---
+
 ## Аппаратное переключение скорости (`switch_target`)
 
 Функция `switch_target()` обеспечивает хардверное управление вращением без использования терминала. Она циклично опрашивает два входа и жестко задает `motor.target`[cite: 2]. 
