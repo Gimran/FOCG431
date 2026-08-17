@@ -150,7 +150,7 @@ void setup() // SECTION - setup
 	commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
 	commander.address = loadCANID(CAN_ID); // CANID из EEPROM (CAN_ID - значение по умолчанию)
 	printf("CANID: %d\r\n", commander.address);
-	commander.init();
+	commander.init(); //git check
 
   initServoCANBridge(commander);
 
