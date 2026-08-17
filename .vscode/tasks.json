@@ -30,9 +30,11 @@
             },
             "group": "build",
             "problemMatcher": []
-            
+
         },
 		{
+            // ВНИМАНИЕ: пишет по 0x08000000 и затирает бутлоадер Katapult.
+            // Для платы с Katapult используйте app_flash_katapult_by_STCLI.
             "label": "flash_by_STCLI",
             // Выполнение через командную строку
             "type": "shell",
@@ -52,7 +54,7 @@
             },
             "group": "build",
             "problemMatcher": []
-            
+
         },
 		{
             "label": "Clear_by_STCLI",
@@ -61,6 +63,66 @@
             // "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
             "command": "& $env:STCLI -c port=SWD --erase all",
             "group": "build"
+        },
+
+        // ======================= KATAPULT =======================
+        // Раскладка flash: 0x08000000..0x08002000 - бутлоадер, приложение с 0x08002000.
+        // Приложение собирается окружением genericSTM32G431CB_katapult (см. platformio.ini).
+
+        {
+            // Сборка приложения со смещением 8 КиБ под бутлоадер
+            "label": "build_katapult_app",
+            "type": "shell",
+            "command": "& \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\platformio.exe\" run -e genericSTM32G431CB_katapult",
+            "presentation": {
+                "echo": true, "reveal": "always", "focus": false,
+                "panel": "shared", "showReuseMessage": false, "clear": true
+            },
+            "group": "build",
+            "problemMatcher": ["$platformio"]
+        },
+        {
+            // Установка бутлоадера. Стирание обязательно: иначе остатки прежней
+            // прошивки по 0x08002000 Katapult примет за валидное приложение
+            // и уйдёт в него вместо режима загрузки.
+            // После этой задачи приложения на плате нет - плата ждёт прошивку
+            // (по CAN через flashtool или задачей app_flash_katapult_by_STCLI).
+            "label": "katapult_flash_by_STCLI",
+            "type": "shell",
+            "command": "& $env:STCLI -c port=SWD sn=066AFF565653756687215232 --erase all -w tools\\katapult.bin 0x08000000 --start",
+            "presentation": {
+                "echo": true, "reveal": "always", "focus": false,
+                "panel": "shared", "showReuseMessage": false, "clear": true
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            // Прошивка только приложения по 0x08002000. Бутлоадер не затрагивается:
+            // STM32_Programmer_CLI стирает лишь страницы, в которые пишет.
+            "label": "app_flash_katapult_by_STCLI",
+            "type": "shell",
+            "command": "& $env:STCLI -c port=SWD sn=066AFF565653756687215232 -w .pio\\build\\genericSTM32G431CB_katapult\\firmware.bin 0x08002000 --start",
+            "dependsOn": "build_katapult_app",
+            "presentation": {
+                "echo": true, "reveal": "always", "focus": false,
+                "panel": "shared", "showReuseMessage": false, "clear": true
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            // Полная установка с нуля: стирание, бутлоадер, приложение - одним заходом.
+            "label": "full_flash_katapult_by_STCLI",
+            "type": "shell",
+            "command": "& $env:STCLI -c port=SWD sn=066AFF565653756687215232 --erase all -w tools\\katapult.bin 0x08000000 -w .pio\\build\\genericSTM32G431CB_katapult\\firmware.bin 0x08002000 --start",
+            "dependsOn": "build_katapult_app",
+            "presentation": {
+                "echo": true, "reveal": "always", "focus": false,
+                "panel": "shared", "showReuseMessage": false, "clear": true
+            },
+            "group": "build",
+            "problemMatcher": []
         }
 	]
 }
