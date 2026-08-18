@@ -853,8 +853,7 @@ class SimpleFOCCANStudio(ctk.CTk):
             self.toggle_light_poll()     # поднимаем фоновый опрос, если он включён
         else:
             self.running = False
-            self.auto_poll_enabled = False
-            self.light_poll_active = False
+            self.stop_polling()          # ждём потоки до закрытия сокета
             self.switch_poll.deselect()
             if self.raw:
                 self.raw.close()
@@ -1134,6 +1133,36 @@ class SimpleFOCCANStudio(ctk.CTk):
                 state="normal" if self.running else "disabled"))
 
     # ---------- глобальный лайт-опрос ----------
+
+    def stop_polling(self, timeout=2.0):
+        """Останавливает оба цикла опроса и ДОЖИДАЕТСЯ выхода потоков.
+
+        Ожидание принципиально: иначе поток может оказаться внутри чтения
+        сокета в момент его закрытия. Возвращает (был_авто, был_лайт),
+        чтобы вызывающий мог восстановить состояние."""
+        was = (self.auto_poll_enabled, self.light_poll_active)
+        self.auto_poll_enabled = False
+        self.light_poll_active = False
+        for t in (self.poll_thread, self.light_thread):
+            if t is not None and t.is_alive() and t is not threading.current_thread():
+                t.join(timeout=timeout)
+        self.poll_thread = None
+        self.light_thread = None
+        return was
+
+    def resume_polling(self, state):
+        """Восстанавливает опросы, остановленные stop_polling()."""
+        was_auto, was_light = state
+        if not self.running:
+            return
+        if was_light and not self.light_poll_active:
+            self.light_poll_active = True
+            self.light_thread = threading.Thread(target=self._light_poll_loop, daemon=True)
+            self.light_thread.start()
+        if was_auto and not self.auto_poll_enabled:
+            self.auto_poll_enabled = True
+            self.poll_thread = threading.Thread(target=self._bg_poll_loop, daemon=True)
+            self.poll_thread.start()
 
     def toggle_light_poll(self):
         """Фоновое обновление телеметрии. Не зависит от вкладки и от
@@ -1476,9 +1505,12 @@ class SimpleFOCCANStudio(ctk.CTk):
         if not self.ensure_interface_up(channel):
             return
         self.btn_query_uuid.configure(state="disabled")
-        threading.Thread(target=self._query_uuid_worker, args=(flashtool, channel), daemon=True).start()
+        # flashtool рассылает admin-команды: на время запроса освобождаем шину
+        paused = self.stop_polling()
+        threading.Thread(target=self._query_uuid_worker,
+                         args=(flashtool, channel, paused), daemon=True).start()
 
-    def _query_uuid_worker(self, flashtool, channel):
+    def _query_uuid_worker(self, flashtool, channel, paused=(False, False)):
         try:
             cmd = [sys.executable, flashtool, "-i", channel, "-q"]
             self.after(0, self.log, "$ " + " ".join(cmd))
@@ -1496,6 +1528,7 @@ class SimpleFOCCANStudio(ctk.CTk):
             self.after(0, self._set_entry, self.uuid_entry, found[0][0])
         finally:
             self.after(0, lambda: self.btn_query_uuid.configure(state="normal"))
+            self.after(0, self.resume_polling, paused)
 
     def start_flash(self):
         flashtool = self._get_flashtool()
@@ -1510,8 +1543,11 @@ class SimpleFOCCANStudio(ctk.CTk):
             self.log(f"Файл прошивки не найден: {fw}")
             return
         channel = self.can_cb.get()
+        # Шина на время прошивки должна быть свободна: наши запросы
+        # мешают протоколу Katapult и сбивают передачу блоков.
+        self.stop_polling()
         if self.running:
-            self.log("Отключаюсь от шины на время прошивки...")
+            self.log("Опросы остановлены, отключаюсь от шины на время прошивки...")
             self.toggle_connection()
         if not self.ensure_interface_up(channel):
             return
