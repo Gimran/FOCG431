@@ -60,24 +60,99 @@
 
 ---
 
-## Прошивка по CAN (Katapult)
+## Ввод в строй чистого МК
 
-Используется бутлоадер [Katapult](https://github.com/Arksine/katapult). Он занимает первые 8 КиБ flash (0x08000000–0x08002000), приложение собирается со смещением и стартует с 0x08002000.
+Ниже — полная последовательность для платы, на которой ничего нет (новый STM32G431 или после `Clear_by_STCLI`).
 
-### Однократная установка бутлоадера (через ST-Link)
+### Что потребуется
 
-Сборка Katapult на Linux/WSL:
+| Инструмент | Зачем | Примечание |
+|---|---|---|
+| ST-Link + [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html) | первая прошивка | переменная окружения `STCLI` должна указывать на `STM32_Programmer_CLI.exe` |
+| PlatformIO | сборка приложения | окружение `genericSTM32G431CB_katapult` |
+| Linux-хост с socketcan | обновления по CAN и GUI | Windows — только через WSL2 + usbipd |
+
+Бинарник бутлоадера уже лежит в репозитории (`tools/katapult.bin`), собирать Katapult не нужно.
+
+### Раскладка flash
+
+| Адрес | Содержимое |
+|---|---|
+| `0x08000000` – `0x08002000` | Katapult (8 КиБ) |
+| `0x08002000` – … | приложение (окружение `genericSTM32G431CB_katapult`) |
+| последняя страница | эмулируемая EEPROM: CANID, gear ratio |
+
+### Шаг 1. Поставить бутлоадер — единственный раз, когда нужен ST-Link
+
+Задача VS Code **`katapult_flash_by_STCLI`**: стирает чип и пишет бутлоадер.
 
 ```bash
-git clone https://github.com/Arksine/katapult
-cd katapult
-make menuconfig
-make
+& $env:STCLI -c port=SWD --erase all -w tools\katapult.bin 0x08000000 --start
 ```
 
-Параметры menuconfig:
+**Стирание обязательно.** Если записать бутлоадер поверх прежней прошивки без стирания, по `0x08002000` останутся байты старого приложения — Katapult примет их за валидную программу и уйдёт в неё вместо режима загрузки.
 
-| Параметр | Значение |
+После этого приложения на плате нет, и Katapult остаётся в режиме загрузки: он отвечает по CAN сам по себе, поэтому дальше ST-Link не нужен.
+
+Если удобнее залить всё сразу через ST-Link — задача **`full_flash_katapult_by_STCLI`** делает стирание, бутлоадер и приложение одним заходом, тогда шаг 2 можно пропустить.
+
+Отдельные задачи, если нужен только один шаг:
+
+| Задача | Что делает |
+|---|---|
+| `build_katapult_app` | собирает приложение со смещением 8 КиБ |
+| `katapult_flash_by_STCLI` | стирает чип и ставит только бутлоадер |
+| `app_flash_katapult_by_STCLI` | пишет только приложение по `0x08002000`, бутлоадер не трогает |
+| `full_flash_katapult_by_STCLI` | стирание, бутлоадер и приложение одним заходом |
+| `Clear_by_STCLI` | полное стирание |
+
+### Шаг 2. Залить приложение по CAN
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+python3 ~/katapult/scripts/flashtool.py -i can0 -q
+```
+
+Плата с одним бутлоадером отвечает `Detected UUID: <uuid>, Application: Katapult`. Этим UUID её и прошиваем (приложение предварительно собрать задачей `build_katapult_app`):
+
+```bash
+python3 ~/katapult/scripts/flashtool.py -i can0 -u <uuid> -f .pio/build/genericSTM32G431CB_katapult/firmware.bin
+```
+
+После заливки плата сама перезапускается в приложение.
+
+### Шаг 3. Проверить
+
+```bash
+python3 ~/katapult/scripts/flashtool.py -i can0 -q
+```
+
+Теперь ответ — `Application: Klipper`: отвечает **приложение**, оно реализует тот же admin-протокол. Если снова видно `Katapult`, значит приложение не стартовало.
+
+В GUI: кнопка **«Поиск ID»** → выбрать найденный адрес → **Connect**. Значение по умолчанию — `201` (`#define CAN_ID` в [main.cpp](src/main.cpp)).
+
+### Дальнейшие обновления
+
+Те же команды, что в шаге 2 — ST-Link не нужен. Из GUI: вкладка **«Прошивка»** → «Запросить (-q)» → «ПРОШИТЬ ПО CAN». Работающее приложение само уходит в бутлоадер по команде flashtool, вручную ничего переключать не нужно.
+
+UUID вычисляется из уникального ID чипа алгоритмом fasthash64 — тем же, что в Katapult, поэтому совпадает с UUID бутлоадера. Он также печатается в UART при старте (`Katapult UUID: ...`).
+
+Пути входа в бутлоадер, если основной не сработал: запись `1` в регистр `0xEC` (кнопка «В бутлоадер» на вкладке «Сервис»), двойное нажатие reset, автоматический вход при отсутствии валидного приложения.
+
+### Чего делать нельзя
+
+- **Не прошивать задачей `flash_by_STCLI`** — она пишет обычную сборку по `0x08000000` и затирает бутлоадер. Для платы с Katapult только `app_flash_katapult_by_STCLI`.
+- **Не собирать окружением `genericSTM32G431CB`** для платы с бутлоадером: оно линкуется с `0x08000000`.
+- Полное стирание обнуляет эмулируемую EEPROM: CANID и gear ratio возвращаются к зашитым значениям (`CAN_ID` в `main.cpp`, `GEAR_RATIO` в `motor_settings.h`). Если CANID был изменён через регистр `0xE6`, после стирания его надо выставить заново.
+
+### Если понадобится пересобрать Katapult
+
+```bash
+git clone https://github.com/Arksine/katapult && cd katapult
+make menuconfig && make
+```
+
+| Параметр menuconfig | Значение |
 |---|---|
 | Micro-controller Architecture | STMicroelectronics STM32 |
 | Processor model | STM32G431 |
@@ -86,33 +161,28 @@ make
 | Application start offset | 8KiB offset |
 | CAN bus speed | 1000000 |
 
-Прошить `out/katapult.bin` по адресу `0x08000000` (ST-Link/OpenOCD/STM32CubeProgrammer).
+Результат `out/katapult.bin` положить в `tools/katapult.bin`.
 
-### Сборка и прошивка приложения
+### Диагностика связи
 
-Окружение `genericSTM32G431CB_katapult` в `platformio.ini` собирает прошивку со смещением 8 КиБ. Прошить её можно как ST-Link'ом (бутлоадер не затирается), так и по CAN:
-
-Прошивка реализует admin-протокол Katapult/Klipper (стандартный CAN ID 0x3f0, класс `ServoCANCommander`), поэтому **штатный `flashtool.py` работает без дополнительных действий**:
+Если плата не отвечает, различить сторону помогает состояние контроллеров:
 
 ```bash
-# найти устройства на шине; работающая прошивка отвечает UUID'ом ("Application: Klipper")
-python3 katapult/scripts/flashtool.py -i can0 -q
-
-# прошить одной командой: flashtool сам переведёт устройство в бутлоадер
-python3 katapult/scripts/flashtool.py -i can0 -u <uuid> -f .pio/build/genericSTM32G431CB_katapult/firmware.bin
-
-# либо только перевести в бутлоадер без прошивки
-python3 katapult/scripts/flashtool.py -i can0 -u <uuid> -r
+ip -details -statistics link show can0     # ERROR-PASSIVE/BUS-OFF и счётчики
+candump -e any,0:0,#FFFFFFFF can0          # кадры ошибок
 ```
 
-UUID вычисляется из уникального ID чипа тем же алгоритмом, что и в Katapult (fasthash64), поэтому совпадает с UUID бутлоадера; он также печатается в UART при старте (`Katapult UUID: ...`).
-
-Резервные пути входа в бутлоадер: запись `1` в регистр `0xEC` (`REG_BOOTLOADER`), двойное нажатие reset (double reset), автоматический вход при отсутствии валидного приложения.
-
-Примечания:
-- `flashtool.py` работает через socketcan (Linux). На Windows — WSL2 + usbipd для USB-CAN адаптера (candlelight/gs_usb) либо любой Linux-хост на шине.
-- Адресация Katapult (UUID из chip id) не пересекается с CANID SimpleFOC-регистров.
-- Обычное окружение `genericSTM32G431CB` (без смещения) прошивается с 0x08000000 и затирает бутлоадер — для работы с Katapult использовать только `_katapult`-окружение.
+- **Главная ловушка.** Если на шине некому ответить (плата обесточена или чип стёрт), хост копит ошибки передачи и уходит в `ERROR-PASSIVE`. В этом состоянии контроллер бесконечно повторяет неподтверждённый кадр, очередь передачи встаёт — и дальше **всё выглядит мёртвым, даже когда плата уже отвечает**. Лечится перезапуском интерфейса:
+  ```bash
+  sudo ip link set can0 down && sudo ip link set can0 up type can bitrate 1000000
+  ```
+  Автовосстановления нет: `restart-ms 0`. Поэтому после любой неудачной серии запросов интерфейс надо поднять заново, прежде чем делать выводы о плате.
+- `state ERROR-ACTIVE` — норма. `ERROR-PASSIVE`/`BUS-OFF` — сначала перезапустить интерфейс, потом искать причину.
+- Нулевые счётчики ошибок FDCAN на плате при активной передаче хоста означают, что до контроллера не доходит ничего: питание приёмопередатчика, обрыв линии, терминаторы. При неверной скорости счётчики, наоборот, растут.
+- Работает ли МК вообще — видно через ST-Link, не трогая выполнение:
+  ```bash
+  & $env:STCLI -c port=SWD mode=HOTPLUG -r32 0x48000000 4   # GPIOA MODER: 0xABFFFFFF = сброс, ядро не стартовало
+  ```
 
 ---
 

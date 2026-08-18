@@ -116,6 +116,14 @@ SIGNALS = OrderedDict([
 PLOT_POINTS = 3000
 DEFAULT_PLOT_WINDOW_S = 10
 
+# Минимальная высота оси Y по единицам измерения. Без неё автомасштаб
+# растягивает шум (напряжение ±0.1 В) на весь график и он нечитаем.
+MIN_Y_SPAN = {
+    "V": 2.0, "°C": 10.0, "rad": 0.5, "rad/s": 2.0, "A": 1.0, "об/с": 2.0,
+}
+# Сглаживание отображения (экспоненциальное): 1.0 - без фильтра
+SMOOTH_ALPHA = 0.25
+
 # Фоновый «лайт-опрос»: телеметрия 2 раза в секунду. Держит показания живыми
 # при минимальной нагрузке; настраиваемый авто-опрос работает независимо.
 LIGHT_POLL_MS = 500
@@ -264,11 +272,13 @@ class SimpleFOCCANStudio(ctk.CTk):
         self.axis_of = {}
         self.plot_window_s = DEFAULT_PLOT_WINDOW_S
         self.autoscroll_var = tk.BooleanVar(value=True)
+        self.smooth_var = tk.BooleanVar(value=True)
+        self.axis_span = {}
         self.start_time = time.time()
 
         # Переменные чекбоксов "опрашивать" / "на график"
         self.poll_vars = {k: tk.BooleanVar(value=(k == "angle")) for k in SIGNALS}
-        self.plot_vars = {k: tk.BooleanVar(value=(k == "angle")) for k in SIGNALS}
+        self.plot_vars = {k: tk.BooleanVar(value=(k in ("angle", "voltage"))) for k in SIGNALS}
         self.value_labels = {}
 
         self.create_layout()
@@ -365,6 +375,9 @@ class SimpleFOCCANStudio(ctk.CTk):
         self.chk_autoscroll = ctk.CTkCheckBox(ctrl, text="следовать за временем",
                                               variable=self.autoscroll_var, width=40)
         self.chk_autoscroll.pack(side="left", padx=10)
+        self.chk_smooth = ctk.CTkCheckBox(ctrl, text="сглаживание", variable=self.smooth_var,
+                                          width=40, command=self.redraw_plot)
+        self.chk_smooth.pack(side="left", padx=5)
 
         self.plot_status = ctk.CTkLabel(self.plot_frame, text="График обновляется по интервалу авто-опроса",
                                         font=("Segoe UI", 10), text_color="#888888")
@@ -1141,6 +1154,7 @@ class SimpleFOCCANStudio(ctk.CTk):
             if u not in units:
                 units.append(u)
         left_units, right_units = units[:1], units[1:2]
+        self.axis_span = {}
 
         handles = []
         for k in selected:
@@ -1159,8 +1173,10 @@ class SimpleFOCCANStudio(ctk.CTk):
 
         self.ax.set_xlabel("время, с", color='white', fontsize=8)
         self.ax.set_ylabel(", ".join(left_units), color='white', fontsize=8)
+        self.axis_span[id(self.ax)] = MIN_Y_SPAN.get(left_units[0], 0.0) if left_units else 0.0
         if self.ax2 is not None:
             self.ax2.set_ylabel(", ".join(right_units), color='white', fontsize=8)
+            self.axis_span[id(self.ax2)] = MIN_Y_SPAN.get(right_units[0], 0.0)
         leg = self.ax.legend(handles=handles, labels=[h.get_label() for h in handles],
                              loc='upper left', fontsize=8, facecolor='#252526',
                              edgecolor='#555555', labelcolor='white')
@@ -1170,6 +1186,17 @@ class SimpleFOCCANStudio(ctk.CTk):
             text=f"Внимание: выбрано {len(units)} разных единиц, читаемы только две оси"
             if len(units) > 2 else "График обновляется по интервалу авто-опроса")
         self.fig.tight_layout()
+
+    @staticmethod
+    def _smooth(ys, alpha=SMOOTH_ALPHA):
+        """Экспоненциальное сглаживание для отображения. Данные в буфере
+        остаются сырыми - фильтр влияет только на картинку."""
+        out = []
+        acc = ys[0]
+        for v in ys:
+            acc += alpha * (v - acc)
+            out.append(acc)
+        return out
 
     def apply_plot_window(self):
         try:
@@ -1201,12 +1228,16 @@ class SimpleFOCCANStudio(ctk.CTk):
             xmin = min((self.data[k][0][0] for k in selected if self.data[k]), default=0.0)
         now = last_t
 
+        smooth = self.smooth_var.get()
         per_axis = {}
         for k, line in self.plot_lines.items():
             pts = [p for p in self.data[k] if p[0] >= xmin]
-            line.set_data([p[0] for p in pts], [p[1] for p in pts])
+            ys = [p[1] for p in pts]
+            if smooth and ys:
+                ys = self._smooth(ys)
+            line.set_data([p[0] for p in pts], ys)
             ax = self.axis_of.get(k, self.ax)
-            per_axis.setdefault(id(ax), (ax, []))[1].extend(p[1] for p in pts)
+            per_axis.setdefault(id(ax), (ax, []))[1].extend(ys)
 
         for ax in (self.ax, self.ax2):
             if ax is not None:
@@ -1214,7 +1245,12 @@ class SimpleFOCCANStudio(ctk.CTk):
         for ax, ys in per_axis.values():
             if ys:
                 lo, hi = min(ys), max(ys)
-                pad = (hi - lo) * 0.1 or max(abs(hi) * 0.1, 0.5)
+                # не даём оси схлопнуться на шуме: держим минимальную высоту
+                min_span = getattr(self, "axis_span", {}).get(id(ax), 0.0)
+                if (hi - lo) < min_span:
+                    mid = (lo + hi) / 2.0
+                    lo, hi = mid - min_span / 2.0, mid + min_span / 2.0
+                pad = (hi - lo) * 0.1 or 0.5
                 ax.set_ylim(lo - pad, hi + pad)
         self.canvas.draw_idle()
 
