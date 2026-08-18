@@ -33,13 +33,11 @@ PKT_READ_REQUEST = 0x1
 PKT_WRITE_REQUEST = 0x2
 PKT_READ_RESPONSE = 0x3
 
-# Скорости классического CAN. Выше 1 Мбит требуется CAN FD с переключением
-# скорости в фазе данных (BRS): его не поддерживают ни текущая прошивка
-# (SimpleCANio шлёт кадры как FDCAN_CLASSIC_CAN), ни бутлоадер Katapult,
-# который жёстко работает на 1 Мбит - на другой скорости прошивка по CAN
-# перестанет находить плату.
-CAN_BITRATES = [125000, 250000, 500000, 800000, 1000000]
-CAN_BITRATE = 1000000            # рабочая скорость проекта (и Katapult)
+# Скорость шины фиксирована и выбору не подлежит: на ней работают и прошивка,
+# и бутлоадер Katapult. Классический CAN всё равно ограничен 1 Мбит, а выше
+# нужен CAN FD с переключением скорости в фазе данных, которого нет ни в
+# SimpleCANio (кадры уходят как FDCAN_CLASSIC_CAN), ни в Katapult.
+CAN_BITRATE = 1000000
 
 # --- Штатные регистры SimpleFOC (simplefoc/registers.py) ---
 REG_STATUS          = 0x00
@@ -322,22 +320,12 @@ class SimpleFOCCANStudio(ctk.CTk):
                                          command=self.toggle_connection)
         self.btn_connect.grid(row=1, column=3, padx=5, pady=5)
 
-        ctk.CTkLabel(conn_frame, text="Скорость:", font=("Segoe UI", 11)).grid(
-            row=2, column=0, sticky="e", padx=5)
-        self.bitrate_cb = ctk.CTkComboBox(conn_frame, width=110,
-                                          values=[f"{b // 1000} кбит" for b in CAN_BITRATES])
-        self.bitrate_cb.set(f"{CAN_BITRATE // 1000} кбит")
-        self.bitrate_cb.grid(row=2, column=1, padx=5, pady=(0, 4))
-        ctk.CTkLabel(conn_frame, text="Katapult работает только на 1000 кбит",
-                     font=("Segoe UI", 10), text_color="#888888").grid(
-            row=2, column=2, columnspan=2, sticky="w", padx=5)
-
         # Глобальный фоновый опрос телеметрии - работает на всех вкладках
         self.switch_light = ctk.CTkSwitch(
             conn_frame, text=f"Лайт-опрос телеметрии ({1000 // LIGHT_POLL_MS} Гц)",
             command=self.toggle_light_poll)
         self.switch_light.select()      # по умолчанию включён
-        self.switch_light.grid(row=3, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 8))
+        self.switch_light.grid(row=2, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 8))
 
         self.tabs = ctk.CTkTabview(left_panel)
         self.tabs.pack(fill="both", expand=True, padx=10, pady=5)
@@ -748,7 +736,6 @@ class SimpleFOCCANStudio(ctk.CTk):
     def ensure_interface_up(self, channel):
         """Проверяет, поднят ли CAN-интерфейс, и при необходимости поднимает его."""
         flags_path = f"/sys/class/net/{channel}/flags"
-        want = self.selected_bitrate()
         try:
             with open(flags_path) as f:
                 is_up = bool(int(f.read().strip(), 16) & 0x1)  # IFF_UP
@@ -758,32 +745,23 @@ class SimpleFOCCANStudio(ctk.CTk):
 
         if is_up:
             current = self.current_bitrate(channel)
-            if current == want:
+            if current == CAN_BITRATE:
                 return True
-            self.log(f"Скорость {channel}: {current} -> {want} бит/с, перезапускаю интерфейс")
+            # Чужая скорость на шине - связи не будет, поднимаем на рабочей
+            self.log(f"Скорость {channel} = {current} бит/с вместо {CAN_BITRATE}, перезапускаю")
             subprocess.run(["sudo", "-n", "ip", "link", "set", channel, "down"],
                            capture_output=True, text=True)
 
         cmd = ["sudo", "-n", "ip", "link", "set", channel, "up", "type", "can",
-               "bitrate", str(want)]
+               "bitrate", str(CAN_BITRATE)]
         self.log(f"Поднимаю {channel}: {' '.join(cmd[2:])}")
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             self.log(f"Не удалось поднять {channel} (sudo требует пароль?): {r.stderr.strip()}")
-            self.log(f"Выполните вручную: sudo ip link set {channel} up type can bitrate {want}")
+            self.log(f"Выполните вручную: sudo ip link set {channel} up type can bitrate {CAN_BITRATE}")
             return False
-        self.log(f"Интерфейс {channel} поднят ({want} бит/с)")
-        if want != CAN_BITRATE:
-            self.log("ВНИМАНИЕ: прошивка и Katapult работают на 1000000 бит/с — "
-                     "на другой скорости связи не будет")
+        self.log(f"Интерфейс {channel} поднят ({CAN_BITRATE} бит/с)")
         return True
-
-    def selected_bitrate(self):
-        """Скорость из выпадающего списка ('1000 кбит' -> 1000000)."""
-        try:
-            return int(self.bitrate_cb.get().split()[0]) * 1000
-        except (ValueError, IndexError):
-            return CAN_BITRATE
 
     @staticmethod
     def current_bitrate(channel):
