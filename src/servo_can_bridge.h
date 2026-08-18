@@ -16,6 +16,10 @@ protected:
 // Функция инициализации моста (загрузка EEPROM и привязка коллбека)
 void initServoCANBridge(CANCommander& commander);
 
+// Дефолтный CANID из уникального ID чипа (1..254).
+// Применяется, если в EEPROM нет сохранённого адреса.
+uint8_t defaultCANID();
+
 // Читает сохранённый CANID из EEPROM, при отсутствии/некорректном значении возвращает default_id.
 // Вызывать до commander.init(), чтобы аппаратный CAN-фильтр настроился на актуальный ID.
 uint8_t loadCANID(uint8_t default_id);

@@ -257,11 +257,29 @@ static uint64_t fasthash64(const uint8_t* buf, size_t len, uint64_t seed) {
     return fh_mix(h);
 }
 
+// UUID считается один раз: он нужен и admin-протоколу, и дефолтному CANID,
+// поэтому адрес узла предсказуем по тому же UUID, что показывает flashtool.
+static bool uuid_ready = false;
+static void ensureUUID() {
+    if (uuid_ready) return;
+    uint64_t hash = fasthash64((const uint8_t*)UID_BASE, 12, 0xA16231A7ULL);
+    memcpy(can_uuid, &hash, sizeof(can_uuid));
+    uuid_ready = true;
+}
+
+// Дефолтный адрес узла из UUID: младшие разряды укладываем в 1..254.
+// Нужен, чтобы несколько плат на одной линии не стартовали с одним адресом.
+// Явно заданный регистром 0xE6 адрес хранится в EEPROM и имеет приоритет.
+uint8_t defaultCANID() {
+    ensureUUID();
+    uint32_t v = ((uint32_t)can_uuid[0] << 16) | ((uint32_t)can_uuid[1] << 8) | can_uuid[2];
+    return (uint8_t)(1 + (v % 254));   // 0 и 255 зарезервированы
+}
+
 void ServoCANCommander::init() {
     CANCommander::init();
 
-    uint64_t hash = fasthash64((const uint8_t*)UID_BASE, 12, 0xA16231A7ULL);
-    memcpy(can_uuid, &hash, sizeof(can_uuid));
+    ensureUUID();
     printf("Katapult UUID: %02x%02x%02x%02x%02x%02x\r\n",
            can_uuid[0], can_uuid[1], can_uuid[2],
            can_uuid[3], can_uuid[4], can_uuid[5]);

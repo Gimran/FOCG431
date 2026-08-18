@@ -22,7 +22,9 @@
 
 // https://aliexpress.ru/item/1005011940269500.html?shpMethod=CAINIAO_STANDARD&sku_id=12000057084077340&spm=a2g2w.productlist.search_results.7.6ae866dbWRL1HV
 
-#define CAN_ID 201
+// #define CAN_ID 201   // фиксированный адрес больше не используется:
+// по умолчанию адрес берётся из UID чипа (defaultCANID), а заданный
+// через регистр 0xE6 хранится в EEPROM и имеет приоритет
 // #define USE_UART_COMMANDER
 #define USE_CAN_COMMANDER
 
@@ -87,7 +89,7 @@ DRV8323_VARS_t gDrv8323 = DRV8323_DEFAULTS;
 Commander command = Commander(UART_COM);
 #elifdef USE_CAN_COMMANDER
 CANio can = CANio(CAN_RX, CAN_TX, CAN_SHDN, CAN_ENABLE); // <- create SimpleCAN object
-ServoCANCommander commander(can, CAN_ID); // CANCommander + admin-протокол Katapult (0x3f0)
+ServoCANCommander commander(can, 0); // адрес выставляется в setup(): EEPROM либо UID чипа
 #endif
 
 #ifdef USE_UART_COMMANDER
@@ -148,8 +150,9 @@ void setup() // SECTION - setup
 #elifdef USE_CAN_COMMANDER
 	printf("CAN_init\r\n");
 	commander.baudrate = 1000000; // Set CAN baudrate to 1 Mbps
-	commander.address = loadCANID(CAN_ID); // CANID из EEPROM (CAN_ID - значение по умолчанию)
-	printf("CANID: %d\r\n", commander.address);
+	uint8_t id_default = defaultCANID();        // из UID чипа
+	commander.address = loadCANID(id_default);  // сохранённый в EEPROM важнее
+	printf("CANID: %d (default from UID: %d)\r\n", commander.address, id_default);
 	commander.init(); //git check
 
   initServoCANBridge(commander);
